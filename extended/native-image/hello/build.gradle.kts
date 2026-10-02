@@ -20,3 +20,12 @@ compose.desktop.application {
     }
 }
 
+
+// The classpath the application runs with, for probes that call native-image directly.
+tasks.register("writeRuntimeClasspath") {
+    val classpath = sourceSets.main.get().runtimeClasspath
+    val out = layout.buildDirectory.file("runtime-classpath.txt")
+    inputs.files(classpath)
+    outputs.file(out)
+    doLast { out.get().asFile.writeText(classpath.files.joinToString(File.pathSeparator)) }
+}

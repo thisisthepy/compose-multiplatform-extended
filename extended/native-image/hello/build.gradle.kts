@@ -4,7 +4,7 @@
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1"
+    id("org.jetbrains.compose") version "1.11.1-extended-dev"
 }
 
 dependencies {
@@ -14,13 +14,9 @@ dependencies {
 
 compose.desktop.application {
     mainClass = "hello.MainKt"
+    nativeImage {
+        // Liberica NIK Full and the static Skia archive; see ../README.md.
+        providers.environmentVariable("SKIKO_STATIC").orNull?.let { skikoStaticDirectory.set(file(it)) }
+    }
 }
 
-// The classpath the application runs with, written out for the native-image proof script.
-tasks.register("writeRuntimeClasspath") {
-    val classpath = sourceSets.main.get().runtimeClasspath
-    val out = layout.buildDirectory.file("runtime-classpath.txt")
-    inputs.files(classpath)
-    outputs.file(out)
-    doLast { out.get().asFile.writeText(classpath.files.joinToString(File.pathSeparator)) }
-}

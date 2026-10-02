@@ -13,6 +13,7 @@ import org.gradle.api.tasks.SourceSet
 import org.jetbrains.compose.desktop.application.dsl.JvmApplication
 import org.jetbrains.compose.desktop.application.dsl.JvmApplicationDistributions
 import org.jetbrains.compose.desktop.application.dsl.JvmApplicationBuildTypes
+import org.jetbrains.compose.desktop.application.dsl.NativeImageSettings
 import org.jetbrains.compose.internal.utils.new
 import org.jetbrains.kotlin.gradle.plugin.KotlinTarget
 import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
@@ -69,5 +70,10 @@ internal open class JvmApplicationInternal @Inject constructor(
     final override val buildTypes: JvmApplicationBuildTypes by data::buildTypes
     final override fun buildTypes(fn: Action<JvmApplicationBuildTypes>) {
         fn.execute(data.buildTypes)
+    }
+
+    final override val nativeImage: NativeImageSettings by data::nativeImage
+    final override fun nativeImage(fn: Action<NativeImageSettings>) {
+        fn.execute(data.nativeImage)
     }
 }

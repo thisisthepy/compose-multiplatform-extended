@@ -35,6 +35,7 @@ internal fun JvmApplicationContext.configureJvmApplication() {
     val commonTasks = configureCommonJvmDesktopTasks()
     configurePackagingTasks(commonTasks)
     copy(buildType = app.buildTypes.release).configurePackagingTasks(commonTasks)
+    configureNativeImage()
     if (currentOS == OS.Windows) {
         configureWix()
     }

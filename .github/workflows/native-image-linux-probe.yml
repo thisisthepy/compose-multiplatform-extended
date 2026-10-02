@@ -1,0 +1,63 @@
+# Probes and checks a Compose desktop application as one native-image executable on Linux x64.
+# native-image builds for the system it runs on, so this is the only place it can be tried.
+# On its own branch; nothing here gates anything.
+name: native-image Linux probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feature/native-image-linux ]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NIK_URL: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-linux-amd64.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build and display packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            build-essential pkg-config xvfb xauth libgl1-mesa-dev libgl1-mesa-dri \
+            libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev \
+            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk
+
+      - name: skiko's build scripts from the core fork
+        uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: feature/static-skiko-linux
+          path: core-extended
+          sparse-checkout: extended/skiko
+
+      - name: Liberica NIK 25 Full
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_URL"
+          mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
+          home="$(ls -d "$RUNNER_TEMP"/nik/*/ | head -1)"
+          echo "GRAALVM_HOME=${home%/}" >> "$GITHUB_ENV"
+          "${home}bin/native-image" --version
+
+      - name: Plugin to the local repository
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+
+      - name: Probe
+        working-directory: extended/native-image/hello
+        run: bash ../linux-probe.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe
+          path: |
+            extended/native-image/hello/build/probe/
+          if-no-files-found: ignore

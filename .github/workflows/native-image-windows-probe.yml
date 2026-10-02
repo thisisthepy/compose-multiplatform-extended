@@ -5,6 +5,10 @@ name: native-image Windows probe
 
 on:
   workflow_dispatch:
+    inputs:
+      core_ref:
+        description: compose-multiplatform-core-extended ref for extended/skiko
+        default: extended
   push:
     branches: [ ci/windows-native-image-probe ]
 
@@ -31,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: thisisthepy/compose-multiplatform-core-extended
-          ref: extended
+          ref: ${{ inputs.core_ref || 'extended' }}
           path: core-extended
           sparse-checkout: extended/skiko
 

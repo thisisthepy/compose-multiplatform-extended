@@ -7,6 +7,7 @@ package org.jetbrains.compose.nativeimage;
 
 import java.lang.reflect.Method;
 import org.graalvm.nativeimage.hosted.Feature;
+import org.graalvm.nativeimage.hosted.RuntimeJNIAccess;
 
 /**
  * Tells a native image that the desktop libraries a Compose application loads are already
@@ -71,6 +72,24 @@ public final class StaticDesktopLibrariesFeature implements Feature {
             }
         } catch (ReflectiveOperationException e) {
             throw internalApiChanged(e);
+        }
+        if (LinkedLibraries.contains("awt_xawt")) {
+            registerXawtUpcalls();
+        }
+    }
+
+    /**
+     * What X11 AWT's native code calls back into Java that GraalVM's own AWT support does not
+     * register. The toolkit thread yields through {@code Thread.yield} found by JNI when its
+     * poll has no timeout, which happens only now and then, so a tracing agent run catches it
+     * only now and then; without it the toolkit thread dies with NoClassDefFoundError.
+     */
+    private static void registerXawtUpcalls() {
+        try {
+            RuntimeJNIAccess.register(Thread.class);
+            RuntimeJNIAccess.register(Thread.class.getMethod("yield"));
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException(e);
         }
     }
 

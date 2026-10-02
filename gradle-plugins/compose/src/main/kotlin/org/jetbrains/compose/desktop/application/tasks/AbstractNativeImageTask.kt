@@ -179,15 +179,20 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     }
 
     /**
-     * Linux: GraalVM links AWT as shared libraries copied beside the image, so here every AWT
-     * library is linked whole from NIK's static archives and registered as built in, with the
-     * packages whose native methods it holds. Their `JNI_OnLoad_<name>` are on GraalVM's own
-     * list and resolved at link time; skiko's is not, and is looked up with `dlsym` at run
-     * time, so it is put in the dynamic symbol table.
+     * Linux: GraalVM copies AWT's shared libraries beside the image. Registered as built in
+     * instead, with the packages whose native methods each holds, they are linked from NIK's
+     * static archives by GraalVM itself, as ordinary archives: every native method the image
+     * can reach and every `JNI_OnLoad_<name>` of theirs is referred to by symbol, so nothing
+     * is forced. JAWT, which nothing registers, is linked with Skia, and the AWT archives are
+     * named again there because JAWT reaches into them after their first scan. skiko's
+     * `JNI_OnLoad_skiko` is not on GraalVM's list and is looked up with `dlsym` at run time,
+     * so it is put in the dynamic symbol table.
      */
     private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
-        val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
+        // sun.font declares a Windows-only native, and the prefix that makes sun.font built in
+        // makes the image refer to it.
+        val stubs = compileC(graalvm, foreignStubs(skikoArchive, listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows")), "foreign_stubs")
         val linked = listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
             "awt_xawt",
@@ -199,17 +204,15 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         )
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
-        linker("-Wl,--whole-archive")
-        for (archive in Platform.LinuxX64.staticJdkArchives) {
+        linker("-Wl,--whole-archive", skikoArchive.absolutePath, "-Wl,--no-whole-archive")
+        // Skia's archives refer to one another in both directions. FreeType comes after them,
+        // so it fills only what neither AWT's font code nor Skia defines.
+        linker("-Wl,--start-group")
+        linker(staticJdk.resolve("libjawt.a").absolutePath)
+        skiaArchives.sortedBy { if (it.name == "libskia.a") 0 else 1 }.forEach { linker(it.absolutePath) }
+        for (archive in listOf("libawt_xawt.a", "libawt.a", "libfreetype.a")) {
             linker(staticJdk.resolve(archive).absolutePath)
         }
-        linker(skikoArchive.absolutePath)
-        linker("-Wl,--no-whole-archive")
-        // Skia's archives refer to one another in both directions, and FreeType comes after
-        // them so it fills only what neither AWT's font code nor Skia defines.
-        linker("-Wl,--start-group")
-        skiaArchives.sortedBy { if (it.name == "libskia.a") 0 else 1 }.forEach { linker(it.absolutePath) }
-        linker(staticJdk.resolve("libfreetype.a").absolutePath)
         linker("-Wl,--end-group")
         linker(onLoad.absolutePath, stubs.absolutePath)
         for (library in listOf("stdc++", "GL", "X11", "Xext", "Xi", "Xrender", "Xtst", "fontconfig", "dl", "m", "pthread")) {
@@ -307,7 +310,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         ),
         LinuxX64(
             "lib/static/linux-amd64/glibc",
-            listOf("libawt.a", "libawt_xawt.a", "libfontmanager.a", "libjavajpeg.a", "liblcms.a", "libmlib_image.a", "libjawt.a"),
+            listOf("libawt.a", "libawt_xawt.a", "libfontmanager.a", "libfreetype.a", "libjavajpeg.a", "liblcms.a", "libmlib_image.a", "libjawt.a"),
             "libskiko-static.a",
             ".a",
         ),
@@ -387,11 +390,12 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
     /**
      * Stops for the skiko JNI methods this platform does not implement: every native method
-     * declared in skiko's classes, by its JNI name, less the ones the archive defines.
+     * declared in skiko's classes, by its JNI name, less the ones the archive defines, and
+     * any [extra] names the caller knows the image refers to without defining.
      */
-    private fun foreignStubs(skikoArchive: File): String {
+    private fun foreignStubs(skikoArchive: File, extra: List<String> = emptyList()): String {
         val defined = definedSymbols(skikoArchive)
-        val declared = declaredSkikoNatives()
+        val declared = declaredSkikoNatives() + extra
         val foreign = (declared - defined).sorted()
         return buildString {
             appendLine("/* Generated by packageNativeImage: skiko JNI methods of other platforms, defined as stops. */")

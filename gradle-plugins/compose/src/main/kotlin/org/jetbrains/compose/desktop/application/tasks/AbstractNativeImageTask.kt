@@ -149,6 +149,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val argFile = workDir.resolve("native-image.args")
         argFile.writeText(args.drop(1).joinToString("\n") { quoteArgument(it) })
         run(listOf(args.first(), "@${argFile.absolutePath}"), workDir.resolve("native-image.log"))
+        if (platform == Platform.LinuxX64) removeUnneededLinuxLibraries(output)
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")
     }
 
@@ -184,9 +185,11 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * static archives by GraalVM itself, as ordinary archives: every native method the image
      * can reach and every `JNI_OnLoad_<name>` of theirs is referred to by symbol, so nothing
      * is forced. JAWT, which nothing registers, is linked with Skia, and the AWT archives are
-     * named again there because JAWT reaches into them after their first scan. skiko's
-     * `JNI_OnLoad_skiko` is not on GraalVM's list and is looked up with `dlsym` at run time,
-     * so it is put in the dynamic symbol table.
+     * named again there because JAWT reaches into them after their first scan.
+     *
+     * GraalVM still writes the shared libraries it would have used beside the executable
+     * (the `java` and `jvm` shims, `awt_headless`, `freetype`); the executable needs none of
+     * them, and [removeUnneededLinuxLibraries] takes them away.
      */
     private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
@@ -218,8 +221,14 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (library in listOf("stdc++", "GL", "X11", "Xext", "Xi", "Xrender", "Xtst", "fontconfig", "dl", "m", "pthread")) {
             linker("-l$library")
         }
-        linker("-Wl,--export-dynamic-symbol=JNI_OnLoad_skiko")
         return linked to link
+    }
+
+    private fun removeUnneededLinuxLibraries(output: File) {
+        for (library in listOf("libjava.so", "libjvm.so", "libawt_headless.so", "libfreetype.so")) {
+            val file = output.resolve(library)
+            if (file.delete()) logger.info("native-image: removed $file, which the executable does not load")
+        }
     }
 
     /**

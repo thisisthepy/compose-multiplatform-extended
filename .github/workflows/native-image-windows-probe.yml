@@ -25,6 +25,16 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: skiko's build scripts from the core fork
+        uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: feature/native-image-static-skiko
+          path: core-extended
+          sparse-checkout: extended/skiko
+
       - name: Liberica NIK 25 Full
         run: |
           curl -fsSL -o "$RUNNER_TEMP/nik.zip" "$NIK_URL"

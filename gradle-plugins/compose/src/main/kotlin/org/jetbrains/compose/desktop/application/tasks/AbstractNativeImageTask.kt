@@ -216,6 +216,10 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             linker("$library.lib")
         }
         linker("/EXPORT:JNI_OnLoad_skiko")
+        // The C++ runtime linked in rather than imported. GraalVM's image itself imports
+        // VCRUNTIME140.dll, which a clean Windows does not have, so a single executable takes
+        // the static vcruntime and keeps only the UCRT, which is part of Windows 10 and later.
+        linker("/NODEFAULTLIB:vcruntime.lib", "libvcruntime.lib", "/NODEFAULTLIB:msvcprt.lib", "libcpmt.lib")
         return linked to link
     }
 

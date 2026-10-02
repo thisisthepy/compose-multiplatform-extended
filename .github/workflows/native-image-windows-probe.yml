@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: thisisthepy/compose-multiplatform-core-extended
-          ref: feature/native-image-static-skiko
+          ref: extended
           path: core-extended
           sparse-checkout: extended/skiko
 

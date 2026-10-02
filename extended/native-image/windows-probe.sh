@@ -32,7 +32,7 @@ log "native-image exit=$?"
 [[ -f "$out/stock/hello.exe" ]] && run_check "$out/stock" hello.exe
 
 log "== B: static skiko"
-JAVA_HOME="$GRAALVM_HOME" bash ../../../core-extended/extended/skiko/build-skiko-static-jvm.sh "$(cygpath -u "$RUNNER_TEMP")/skiko-static" > "$out/skiko-static.log" 2>&1
+bash ../../../core-extended/extended/skiko/build-skiko-static-jvm.sh "$(cygpath -u "$RUNNER_TEMP")/skiko-static" > "$out/skiko-static.log" 2>&1
 log "skiko static exit=$?"
 tail -3 "$out/skiko-static.log" >> "$out/summary.txt"
 skiko_out="$(cygpath -u "$RUNNER_TEMP")/skiko-static/out/windows-x64"

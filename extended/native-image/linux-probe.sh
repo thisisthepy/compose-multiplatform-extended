@@ -29,6 +29,15 @@ HELLO_SELF_CHECK="$out/jvm.png" xvfb-run -a ./gradlew --no-daemon -q runNativeIm
 log "agent exit=$?"
 ls -la "$out/jvm.png" >> "$out/summary.txt" 2>&1
 cp -r src/main/native-image "$out/metadata" 2>/dev/null
+# The agent catches AWT's JNI call to Thread.yield only in some runs. The image has to work
+# without it, so it is taken out of what the image is built from.
+python3 - src/main/native-image/reachability-metadata.json <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+data["reflection"] = [e for e in data.get("reflection", []) if e.get("type") != "java.lang.Thread"]
+json.dump(data, open(path, "w"), indent=2)
+PY
 
 log "== B: static skiko"
 bash ../../../core-extended/extended/skiko/build-skiko-static-jvm.sh "$RUNNER_TEMP/skiko-static" > "$out/skiko-static.log" 2>&1
@@ -57,12 +66,16 @@ if [[ -f "$exe" ]]; then
     log "NEEDED:"; readelf -d "$single/native-image-hello" | grep NEEDED >> "$out/summary.txt"
     log "exported JNI_OnLoad:"; nm -D --defined-only "$single/native-image-hello" | grep JNI_OnLoad >> "$out/summary.txt"
     log "files in the empty directory before the run:"; ls -la "$single" >> "$out/summary.txt"
-    (cd "$single" && HELLO_SELF_CHECK="$single/native.png" xvfb-run -a timeout 120 ./native-image-hello > run.log 2>&1; echo "run exit=$?") | tee -a "$out/summary.txt"
-    head -60 "$single/run.log" >> "$out/summary.txt" 2>/dev/null
-    cp "$single/run.log" "$out/run.log" 2>/dev/null
-    cp "$single/native.png" "$out/native.png" 2>/dev/null
-    if cmp -s "$out/jvm.png" "$single/native.png"; then log "render identical to JVM"; else log "render differs or missing"; fi
-    sha256sum "$out/jvm.png" "$single/native.png" >> "$out/summary.txt" 2>&1
+    for n in 1 2 3; do
+        rm -f "$single/native.png" "$single/run.log"
+        (cd "$single" && HELLO_SELF_CHECK="$single/native.png" xvfb-run -a timeout 120 ./native-image-hello > run.log 2>&1; echo "run $n exit=$?") | tee -a "$out/summary.txt"
+        log "run $n: $(grep -cE 'Exception|Error' "$single/run.log") lines naming an exception or error"
+        head -60 "$single/run.log" >> "$out/summary.txt" 2>/dev/null
+        cp "$single/run.log" "$out/run-$n.log" 2>/dev/null
+        cp "$single/native.png" "$out/native-$n.png" 2>/dev/null
+        if cmp -s "$out/jvm.png" "$single/native.png"; then log "run $n: render identical to JVM"; else log "run $n: render differs or missing"; fi
+        sha256sum "$out/jvm.png" "$single/native.png" >> "$out/summary.txt" 2>&1
+    done
     cp "$exe" "$out/" 2>/dev/null
 fi
 exit 0

@@ -218,15 +218,26 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (library in listOf(
             "user32", "gdi32", "ole32", "oleaut32", "imm32", "shell32", "advapi32", "comdlg32", "winspool",
             "uuid", "d3d12", "dxgi", "d3dcompiler", "dxguid", "dwrite", "usp10", "fontsub", "windowscodecs",
-            "opengl32", "dwmapi", "uxtheme", "ws2_32", "bcrypt", "shlwapi", "winmm", "comctl32", "propsys",
+            "dwmapi", "uxtheme", "ws2_32", "bcrypt", "shlwapi", "winmm", "comctl32", "propsys",
         )) {
             linker("$library.lib")
         }
         linker("/EXPORT:JNI_OnLoad_skiko")
-        // vcruntime and the C++ library linked in rather than imported; see above.
-        linker("/NODEFAULTLIB:vcruntime.lib", "libvcruntime.lib", "/NODEFAULTLIB:msvcprt.lib", "libcpmt.lib")
+        // vcruntime and the C++ library linked in rather than imported; see above. GraalVM
+        // adds libraries of its own built against the DLL runtime (sunmscapi.lib) that cannot
+        // be rewritten here, so it is the C++ library's copy that loses its guard instead.
+        linker("/NODEFAULTLIB:vcruntime.lib", "libvcruntime.lib", "/NODEFAULTLIB:msvcprt.lib", "/NODEFAULTLIB:libcpmt.lib")
+        linker(rewritten(msvcLibrary("libcpmt.lib"), into = "msvc").absolutePath)
+        // No opengl32.lib: skiko defines the few OpenGL entry points it calls itself and
+        // resolves them from opengl32.dll at run time, so the import library defines them twice.
         return linked to link
     }
+
+    /** A library from the MSVC installation, found on LIB the way the linker finds it. */
+    private fun msvcLibrary(name: String): File =
+        (System.getenv("LIB") ?: "").split(';').filter { it.isNotBlank() }
+            .map { File(it, name) }.firstOrNull { it.isFile }
+            ?: error("$name is not in any directory on LIB; run from a Developer prompt or after vcvars64.bat")
 
     /**
      * The same bytes with the C runtime directives blanked to spaces: the `RuntimeLibrary`

@@ -83,23 +83,23 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
     @TaskAction
     fun build() {
-        if (currentOS != OS.MacOS || currentArch != Arch.Arm64) {
-            throw GradleException(
-                "packageNativeImage builds macOS arm64 only so far (this is $currentOS $currentArch). " +
-                    "On Windows the JDK's AWT is not shipped as static archives by GraalVM, which is the " +
-                    "open question for a single Windows executable."
+        val platform = when {
+            currentOS == OS.MacOS && currentArch == Arch.Arm64 -> Platform.MacosArm64
+            currentOS == OS.Windows && currentArch == Arch.X64 -> Platform.WindowsX64
+            else -> throw GradleException(
+                "packageNativeImage builds macOS arm64 and Windows x64 so far (this is $currentOS $currentArch)."
             )
         }
         val graalvm = File(graalvmHome.get())
-        val nativeImage = graalvm.resolve("bin/native-image")
+        val nativeImage = graalvm.resolve(if (platform == Platform.WindowsX64) "bin/native-image.cmd" else "bin/native-image")
         if (!nativeImage.isFile) {
             throw GradleException("$nativeImage does not exist. graalvmHome has to name a GraalVM with native-image.")
         }
-        val staticAwt = graalvm.resolve("lib/static/darwin-aarch64")
-        for (archive in listOf("libawt_lwawt.a", "libosxui.a", "libjawt.a")) {
-            if (!staticAwt.resolve(archive).isFile) {
+        val staticJdk = graalvm.resolve(platform.staticJdkDirectory)
+        for (archive in platform.staticJdkArchives) {
+            if (!staticJdk.resolve(archive).isFile) {
                 throw GradleException(
-                    "$graalvm has no ${staticAwt.resolve(archive)}. A single executable links AWT statically, " +
+                    "$graalvm has no ${staticJdk.resolve(archive)}. A single executable links AWT statically, " +
                         "and only a distribution that ships the JDK's static archives can: Liberica NIK Full does."
                 )
             }
@@ -108,50 +108,31 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             "nativeImage.skikoStaticDirectory is not set. A single executable cannot load Skia from a file; " +
                 "build the archive with build-skiko-static-jvm.sh from compose-multiplatform-core-extended and point this at its output."
         )
-        val skikoArchive = skiko.resolve("libskiko-static.a")
-        val skiaArchives = skiko.resolve("skia").listFiles { file -> file.name.endsWith(".a") }?.sortedBy { it.name }
+        val skikoArchive = skiko.resolve(platform.skikoArchive)
+        val skiaArchives = skiko.resolve("skia").listFiles { file -> file.name.endsWith(platform.archiveSuffix) }?.sortedBy { it.name }
         if (!skikoArchive.isFile || skiaArchives.isNullOrEmpty()) {
-            throw GradleException("$skiko has to hold libskiko-static.a and skia/*.a, as build-skiko-static-jvm.sh lays them out.")
+            throw GradleException("$skiko has to hold ${platform.skikoArchive} and skia/*${platform.archiveSuffix}, as build-skiko-static-jvm.sh lays them out.")
         }
 
         workDir.deleteRecursively()
         workDir.mkdirs()
         val supportJar = buildSupportJar(graalvm)
-        val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
-        val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
 
         val output = destinationDir.get().asFile
         output.deleteRecursively()
         output.mkdirs()
 
         val classpath = (runtimeClasspath.files + supportJar).joinToString(File.pathSeparator)
-        val linked = listOf(
-            "awt_lwawt:sun_lwawt|sun_java2d_metal|sun_java2d_opengl|sun_font|sun_awt",
-            "osxui:com_apple_laf",
-            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
-        ).joinToString(",")
-        val link = mutableListOf<String>()
-        fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
-        for (archive in listOf("libawt_lwawt.a", "libosxui.a", "libjawt.a")) {
-            linker("-Wl,-force_load,${staticAwt.resolve(archive)}")
-        }
-        linker("-Wl,-force_load,$skikoArchive")
-        // libskia first, so Skia's core objects come from it rather than a module archive.
-        val skia = skiaArchives.sortedBy { if (it.name == "libskia.a") 0 else 1 }
-        skia.forEach { linker(it.absolutePath) }
-        linker(onLoad.absolutePath, stubs.absolutePath)
-        for (framework in listOf("Metal", "MetalKit", "IOKit")) {
-            linker("-framework", framework)
-        }
-        for (library in listOf("awt_lwawt", "osxui", "skiko")) {
-            linker("-Wl,-exported_symbol,_JNI_OnLoad_$library")
+        val (linked, link) = when (platform) {
+            Platform.MacosArm64 -> macosLink(graalvm, staticJdk, skikoArchive, skiaArchives)
+            Platform.WindowsX64 -> windowsLink(graalvm, staticJdk, skikoArchive, skiaArchives)
         }
 
         val args = mutableListOf(
             nativeImage.absolutePath,
             "-cp", classpath,
             "--no-fallback",
-            "-Dcompose.nativeimage.staticLibraries=$linked",
+            "-Dcompose.nativeimage.staticLibraries=${linked.joinToString(",")}",
         )
         metadataDirectory.orNull?.asFile?.takeIf { it.isDirectory }?.let {
             args += "-H:ConfigurationFileDirectories=${it.absolutePath}"
@@ -161,8 +142,126 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         args += listOf("-o", output.resolve(imageName.get()).absolutePath, mainClass.get())
 
         logger.lifecycle("native-image: building ${imageName.get()}, which takes a few minutes")
-        run(args, workDir.resolve("native-image.log"))
+        // Through an argument file: a classpath alone runs past the 8191 characters Windows
+        // allows a command line through native-image's .cmd launcher.
+        val argFile = workDir.resolve("native-image.args")
+        argFile.writeText(args.drop(1).joinToString("\n") { quoteArgument(it) })
+        run(listOf(args.first(), "@${argFile.absolutePath}"), workDir.resolve("native-image.log"))
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")
+    }
+
+    private fun macosLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+        val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
+        val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
+        val linked = listOf(
+            "awt_lwawt:sun_lwawt|sun_java2d_metal|sun_java2d_opengl|sun_font|sun_awt",
+            "osxui:com_apple_laf",
+            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
+        )
+        val link = mutableListOf<String>()
+        fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
+        for (archive in Platform.MacosArm64.staticJdkArchives) {
+            linker("-Wl,-force_load,${staticJdk.resolve(archive)}")
+        }
+        linker("-Wl,-force_load,$skikoArchive")
+        // libskia first, so Skia's core objects come from it rather than a module archive.
+        skiaArchives.sortedBy { if (it.name == "libskia.a") 0 else 1 }.forEach { linker(it.absolutePath) }
+        linker(onLoad.absolutePath, stubs.absolutePath)
+        for (framework in listOf("Metal", "MetalKit", "IOKit")) {
+            linker("-framework", framework)
+        }
+        for (library in listOf("awt_lwawt", "osxui", "skiko")) {
+            linker("-Wl,-exported_symbol,_JNI_OnLoad_$library")
+        }
+        return linked to link
+    }
+
+    /**
+     * Windows: the JDK's static libraries are built against the C runtime DLL (/MD), and
+     * JetBrains' Skia against the static one (/MT). The MSVC linker refuses to mix them on a
+     * guard each object carries, `/FAILIFMISMATCH:"RuntimeLibrary=..."`. The guard is there for
+     * code that hands C runtime objects across the boundary (a FILE*, a heap pointer one side
+     * frees), and Skia and the JDK share none: they meet only through skiko's JNI calls and
+     * JAWT's window handle. So copies of skiko's and Skia's libraries are made with the guard
+     * and their static runtime defaults blanked out, and the image links the DLL runtime.
+     */
+    private fun windowsLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+        val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
+        val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
+        val relinked = workDir.resolve("relinked").apply { mkdirs() }
+        fun rewritten(library: File): File = relinked.resolve(library.name).also { copy ->
+            copy.writeBytes(blankStaticRuntimeDirectives(library.readBytes()))
+        }
+        val linked = listOf(
+            "awt:java_awt|sun_awt|sun_java2d|sun_print",
+            "fontmanager:sun_font",
+            "javajpeg:com_sun_imageio_plugins_jpeg|sun_awt_image_jpeg",
+            "lcms:sun_java2d_cmm_lcms",
+            "mlib_image:sun_awt_image_ImagingLib",
+            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
+        )
+        val link = mutableListOf<String>()
+        fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
+        for (archive in Platform.WindowsX64.staticJdkArchives) {
+            linker("/WHOLEARCHIVE:${staticJdk.resolve(archive)}")
+        }
+        linker("/WHOLEARCHIVE:${rewritten(skikoArchive)}")
+        skiaArchives.sortedBy { if (it.name == "skia.lib") 0 else 1 }.forEach { linker(rewritten(it).absolutePath) }
+        linker(onLoad.absolutePath, stubs.absolutePath)
+        for (library in listOf(
+            "user32", "gdi32", "ole32", "oleaut32", "imm32", "shell32", "advapi32", "comdlg32", "winspool",
+            "uuid", "d3d12", "dxgi", "d3dcompiler", "dxguid", "dwrite", "usp10", "fontsub", "windowscodecs",
+            "opengl32", "dwmapi", "uxtheme", "ws2_32", "bcrypt",
+        )) {
+            linker("$library.lib")
+        }
+        linker("/EXPORT:JNI_OnLoad_skiko")
+        return linked to link
+    }
+
+    /**
+     * The same bytes with every static C runtime directive blanked to spaces: the
+     * `RuntimeLibrary` mismatch guard and the default libraries of the static runtime. Blanked
+     * rather than removed, so no offset in the file moves.
+     */
+    private fun blankStaticRuntimeDirectives(bytes: ByteArray): ByteArray {
+        val directives = listOf(
+            "/FAILIFMISMATCH:\"RuntimeLibrary=MT_StaticRelease\"",
+            "/DEFAULTLIB:\"LIBCMT\"",
+            "/DEFAULTLIB:\"libcpmt\"",
+            "/DEFAULTLIB:\"LIBCPMT\"",
+            "/DEFAULTLIB:\"libcmt.lib\"",
+            "/DEFAULTLIB:\"libcpmt.lib\"",
+        ).map { it.toByteArray(Charsets.US_ASCII) }
+        val out = bytes.copyOf()
+        var index = 0
+        while (index < out.size) {
+            val match = directives.firstOrNull { directive ->
+                index + directive.size <= out.size && directive.indices.all { out[index + it] == directive[it] }
+            }
+            if (match != null) {
+                match.indices.forEach { out[index + it] = ' '.code.toByte() }
+                index += match.size
+            } else {
+                index++
+            }
+        }
+        return out
+    }
+
+    private enum class Platform(
+        val staticJdkDirectory: String,
+        val staticJdkArchives: List<String>,
+        val skikoArchive: String,
+        val archiveSuffix: String,
+    ) {
+        MacosArm64("lib/static/darwin-aarch64", listOf("libawt_lwawt.a", "libosxui.a", "libjawt.a"), "libskiko-static.a", ".a"),
+        WindowsX64(
+            "lib/static/windows-amd64",
+            listOf("awt.lib", "fontmanager.lib", "freetype.lib", "javajpeg.lib", "lcms.lib", "mlib_image.lib", "jawt.lib"),
+            "skiko-static.lib",
+            ".lib",
+        ),
     }
 
     /** The feature and substitutions, compiled by the GraalVM doing the build. */
@@ -188,13 +287,42 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
     private fun compileC(graalvm: File, source: String, name: String): File {
         val file = workDir.resolve("$name.c").apply { writeText(source) }
-        val obj = workDir.resolve("$name.o")
-        run(
-            listOf("cc", "-c", "-O2", "-arch", "arm64", "-I${graalvm.resolve("include")}", "-I${graalvm.resolve("include/darwin")}",
-                file.absolutePath, "-o", obj.absolutePath),
-            workDir.resolve("$name.log"),
-        )
-        return obj
+        return if (currentOS == OS.Windows) {
+            // cl.exe from the MSVC environment native-image itself needs on Windows.
+            val obj = workDir.resolve("$name.obj")
+            run(
+                listOf("cl.exe", "/nologo", "/c", "/O2", "/MD", "/I${graalvm.resolve("include")}", "/I${graalvm.resolve("include/win32")}",
+                    file.absolutePath, "/Fo${obj.absolutePath}"),
+                workDir.resolve("$name.log"),
+            )
+            obj
+        } else {
+            val obj = workDir.resolve("$name.o")
+            run(
+                listOf("cc", "-c", "-O2", "-arch", "arm64", "-I${graalvm.resolve("include")}", "-I${graalvm.resolve("include/darwin")}",
+                    file.absolutePath, "-o", obj.absolutePath),
+                workDir.resolve("$name.log"),
+            )
+            obj
+        }
+    }
+
+    /** The external symbols an archive defines, without any platform prefix. */
+    private fun definedSymbols(archive: File): Set<String> {
+        val listing = workDir.resolve("${archive.name}-symbols.txt")
+        return if (currentOS == OS.Windows) {
+            run(listOf("dumpbin.exe", "/nologo", "/linkermember:1", archive.absolutePath), listing, quiet = true)
+            listing.readLines().mapNotNull { line ->
+                val parts = line.trim().split(Regex("\\s+"))
+                if (parts.size == 2 && parts[0].all { it.isLetterOrDigit() }) parts[1] else null
+            }.toSet()
+        } else {
+            run(listOf("nm", "-g", archive.absolutePath), listing, quiet = true)
+            listing.readLines().mapNotNull { line ->
+                val parts = line.trim().split(Regex("\\s+"))
+                if (parts.size == 3 && parts[1] == "T") parts[2].removePrefix("_") else null
+            }.toSet()
+        }
     }
 
     /**
@@ -202,13 +330,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * declared in skiko's classes, by its JNI name, less the ones the archive defines.
      */
     private fun foreignStubs(skikoArchive: File): String {
-        val defined = workDir.resolve("skiko-symbols.txt").let { listing ->
-            run(listOf("nm", "-g", skikoArchive.absolutePath), listing, quiet = true)
-            listing.readLines().mapNotNull { line ->
-                val parts = line.trim().split(Regex("\\s+"))
-                if (parts.size == 3 && parts[1] == "T") parts[2].removePrefix("_") else null
-            }.toSet()
-        }
+        val defined = definedSymbols(skikoArchive)
         val declared = declaredSkikoNatives()
         val foreign = (declared - defined).sorted()
         return buildString {
@@ -266,6 +388,12 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         }
         if (!quiet) logger.info(log.readText())
     }
+
+    /** One argument as native-image reads it from an argument file. */
+    private fun quoteArgument(argument: String): String =
+        if (argument.any { it.isWhitespace() || it == '"' || it == '\\' })
+            "\"" + argument.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        else argument
 
     internal companion object {
         /** The JNI short name mangling: '/' is '_', and '_', ';', '[' and non-ASCII are escaped. */

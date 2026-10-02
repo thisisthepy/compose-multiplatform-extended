@@ -2,13 +2,13 @@
 
 What `compose.desktop` makes today is an application with a Java runtime packed beside it.
 `packageNativeImage` makes a GraalVM native image instead: one file, no runtime, nothing
-unpacked at start. macOS arm64 so far.
+unpacked at start. macOS arm64 and Linux x64 so far.
 
 ```kotlin
 compose.desktop.application {
     mainClass = "hello.MainKt"
     nativeImage {
-        graalvmHome = "..."              // or GRAALVM_HOME; Liberica NIK Full on macOS
+        graalvmHome = "..."              // or GRAALVM_HOME; Liberica NIK Full
         skikoStaticDirectory = file("...") // build-skiko-static-jvm.sh output, see below
     }
 }
@@ -52,6 +52,32 @@ runtime is made to agree that it is there. The task does all of this; the code i
    refers to all of them. The task reads skiko's classes for native methods, subtracts what
    the archive defines, and defines the rest as stops.
 
+## On Linux x64
+
+The same pieces, with what GraalVM does on Linux taken into account:
+
+- GraalVM links AWT on Linux as shared libraries copied beside the image. The task registers
+  `awt`, `awt_xawt`, `fontmanager`, `javajpeg`, `lcms` and `mlib_image` as built in, and
+  GraalVM then links them itself from NIK's `lib/static/linux-amd64/glibc` as ordinary
+  archives. Their `JNI_OnLoad_<name>` are on GraalVM's link time list, so nothing is
+  exported. Forcing them in as whole archives as well defines everything twice.
+- AWT loads `libawt_xawt.so` by path from libawt's directory (`System.load`), answered by the
+  same substitution as on macOS.
+- JAWT is not registered by anything; `libjawt.a` is linked in a group with Skia's archives and
+  the AWT archives JAWT reaches into. NIK's `libfreetype.a` closes the group.
+- skiko and libawt both define a global `jvm`. The static archive makes skiko's weak, so they
+  are one variable, which AWT's initialisation sets.
+- `sun.font` declares a Windows-only native the image then refers to; it is defined as a stop
+  with skiko's foreign entry points.
+- X11 AWT's toolkit thread finds `Thread.yield` through JNI, only when its poll has no timeout.
+  A tracing agent run catches that only sometimes, so the feature registers it.
+- GraalVM still writes `libjava.so`, `libjvm.so`, `libawt_headless.so` and `libfreetype.so`
+  beside the executable, which needs none of them; the task removes them.
+
+Linux cannot be built from another system. `linux-probe.sh` and the workflow
+`native-image-linux-probe.yml` build and check it on a GitHub ubuntu runner, the GUI under
+`xvfb-run`.
+
 ## Measured (2026-10-02, Mac mini M1, NIK 25.0.4.1)
 
 `hello` built by `packageNativeImage` is one 82MB executable whose only dependencies are
@@ -59,9 +85,20 @@ system frameworks. Copied alone into an empty directory it opens its window, and
 self-check draws the same content through Skia offscreen into a PNG byte for byte the one the
 JVM run draws.
 
+## Measured on Linux x64 (2026-10-02, GitHub ubuntu-latest runner, NIK 25.0.4.1)
+
+`hello` built by `packageNativeImage` is one 116066760 byte executable; the output directory
+holds nothing else. Its `NEEDED` entries are `libz`, `libstdc++`, `libGL`, `libX11`, `libXext`,
+`libXi`, `libXrender`, `libfontconfig`, `libm`, `libgcc_s`, `libc` and the loader: no
+`libawt*`, no `libskiko`, no `libjvm`. Copied alone into an empty directory and run under
+`xvfb-run`, its self-check PNG is byte for byte the one the JVM run draws (sha256
+`426c589e...b0aa`), in each of three runs. Under Xvfb skiko finds no GL context and falls back
+to its software renderer, in the JVM run and in the executable alike.
+
 ## Not yet
 
-- Windows and Linux. On Windows the JDK's AWT is not shipped as static archives by GraalVM,
+- Windows. On Windows the JDK's AWT is not shipped as static archives by GraalVM,
   which is the open question for a single Windows executable.
+- Linux arm64, and Linux on a real display with GL rather than Xvfb.
 - skiko's static archive is built by a script beside the core fork rather than resolved from a
   repository.

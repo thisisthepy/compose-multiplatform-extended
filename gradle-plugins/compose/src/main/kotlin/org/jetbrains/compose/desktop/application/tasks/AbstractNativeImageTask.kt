@@ -86,8 +86,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val platform = when {
             currentOS == OS.MacOS && currentArch == Arch.Arm64 -> Platform.MacosArm64
             currentOS == OS.Windows && currentArch == Arch.X64 -> Platform.WindowsX64
+            currentOS == OS.Linux && currentArch == Arch.X64 -> Platform.LinuxX64
             else -> throw GradleException(
-                "packageNativeImage builds macOS arm64 and Windows x64 so far (this is $currentOS $currentArch)."
+                "packageNativeImage builds macOS arm64, Linux x64 and Windows x64 so far (this is $currentOS $currentArch)."
             )
         }
         val graalvm = File(graalvmHome.get())
@@ -126,6 +127,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val (linked, link) = when (platform) {
             Platform.MacosArm64 -> macosLink(graalvm, staticJdk, skikoArchive, skiaArchives)
             Platform.WindowsX64 -> windowsLink(graalvm, staticJdk, skikoArchive, skiaArchives)
+            Platform.LinuxX64 -> linuxLink(graalvm, staticJdk, skikoArchive, skiaArchives)
         }
 
         val args = mutableListOf(
@@ -147,6 +149,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val argFile = workDir.resolve("native-image.args")
         argFile.writeText(args.drop(1).joinToString("\n") { quoteArgument(it) })
         run(listOf(args.first(), "@${argFile.absolutePath}"), workDir.resolve("native-image.log"))
+        if (platform == Platform.LinuxX64) removeUnneededLinuxLibraries(output)
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")
     }
 
@@ -174,6 +177,58 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             linker("-Wl,-exported_symbol,_JNI_OnLoad_$library")
         }
         return linked to link
+    }
+
+    /**
+     * Linux: GraalVM copies AWT's shared libraries beside the image. Registered as built in
+     * instead, with the packages whose native methods each holds, they are linked from NIK's
+     * static archives by GraalVM itself, as ordinary archives: every native method the image
+     * can reach and every `JNI_OnLoad_<name>` of theirs is referred to by symbol, so nothing
+     * is forced. JAWT, which nothing registers, is linked with Skia, and the AWT archives are
+     * named again there because JAWT reaches into them after their first scan.
+     *
+     * GraalVM still writes the shared libraries it would have used beside the executable
+     * (the `java` and `jvm` shims, `awt_headless`, `freetype`); the executable needs none of
+     * them, and [removeUnneededLinuxLibraries] takes them away.
+     */
+    private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+        val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
+        // sun.font declares a Windows-only native, and the prefix that makes sun.font built in
+        // makes the image refer to it.
+        val stubs = compileC(graalvm, foreignStubs(skikoArchive, listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows")), "foreign_stubs")
+        val linked = listOf(
+            "awt:java_awt|sun_awt|sun_java2d|sun_print",
+            "awt_xawt",
+            "fontmanager:sun_font",
+            "javajpeg:com_sun_imageio_plugins_jpeg|sun_awt_image_jpeg",
+            "lcms:sun_java2d_cmm_lcms",
+            "mlib_image:sun_awt_image_ImagingLib",
+            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
+        )
+        val link = mutableListOf<String>()
+        fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
+        linker("-Wl,--whole-archive", skikoArchive.absolutePath, "-Wl,--no-whole-archive")
+        // Skia's archives refer to one another in both directions. FreeType comes after them,
+        // so it fills only what neither AWT's font code nor Skia defines.
+        linker("-Wl,--start-group")
+        linker(staticJdk.resolve("libjawt.a").absolutePath)
+        skiaArchives.sortedBy { if (it.name == "libskia.a") 0 else 1 }.forEach { linker(it.absolutePath) }
+        for (archive in listOf("libawt_xawt.a", "libawt.a", "libfreetype.a")) {
+            linker(staticJdk.resolve(archive).absolutePath)
+        }
+        linker("-Wl,--end-group")
+        linker(onLoad.absolutePath, stubs.absolutePath)
+        for (library in listOf("stdc++", "GL", "X11", "Xext", "Xi", "Xrender", "Xtst", "fontconfig", "dl", "m", "pthread")) {
+            linker("-l$library")
+        }
+        return linked to link
+    }
+
+    private fun removeUnneededLinuxLibraries(output: File) {
+        for (library in listOf("libjava.so", "libjvm.so", "libawt_headless.so", "libfreetype.so")) {
+            val file = output.resolve(library)
+            if (file.delete()) logger.info("native-image: removed $file, which the executable does not load")
+        }
     }
 
     /**
@@ -262,6 +317,12 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             "skiko-static.lib",
             ".lib",
         ),
+        LinuxX64(
+            "lib/static/linux-amd64/glibc",
+            listOf("libawt.a", "libawt_xawt.a", "libfontmanager.a", "libfreetype.a", "libjavajpeg.a", "liblcms.a", "libmlib_image.a", "libjawt.a"),
+            "libskiko-static.a",
+            ".a",
+        ),
     }
 
     /** The feature and substitutions, compiled by the GraalVM doing the build. */
@@ -296,6 +357,14 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
                 workDir.resolve("$name.log"),
             )
             obj
+        } else if (currentOS == OS.Linux) {
+            val obj = workDir.resolve("$name.o")
+            run(
+                listOf("cc", "-c", "-O2", "-fPIC", "-I${graalvm.resolve("include")}", "-I${graalvm.resolve("include/linux")}",
+                    file.absolutePath, "-o", obj.absolutePath),
+                workDir.resolve("$name.log"),
+            )
+            obj
         } else {
             val obj = workDir.resolve("$name.o")
             run(
@@ -320,18 +389,22 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             run(listOf("nm", "-g", archive.absolutePath), listing, quiet = true)
             listing.readLines().mapNotNull { line ->
                 val parts = line.trim().split(Regex("\\s+"))
-                if (parts.size == 3 && parts[1] == "T") parts[2].removePrefix("_") else null
+                // Mach-O prefixes C names with an underscore; ELF does not.
+                if (parts.size == 3 && parts[1] == "T") {
+                    if (currentOS == OS.MacOS) parts[2].removePrefix("_") else parts[2]
+                } else null
             }.toSet()
         }
     }
 
     /**
      * Stops for the skiko JNI methods this platform does not implement: every native method
-     * declared in skiko's classes, by its JNI name, less the ones the archive defines.
+     * declared in skiko's classes, by its JNI name, less the ones the archive defines, and
+     * any [extra] names the caller knows the image refers to without defining.
      */
-    private fun foreignStubs(skikoArchive: File): String {
+    private fun foreignStubs(skikoArchive: File, extra: List<String> = emptyList()): String {
         val defined = definedSymbols(skikoArchive)
-        val declared = declaredSkikoNatives()
+        val declared = declaredSkikoNatives() + extra
         val foreign = (declared - defined).sorted()
         return buildString {
             appendLine("/* Generated by packageNativeImage: skiko JNI methods of other platforms, defined as stops. */")

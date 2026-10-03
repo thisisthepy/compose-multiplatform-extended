@@ -8,11 +8,13 @@ package org.jetbrains.compose.desktop.application.tasks
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputDirectory
@@ -74,6 +76,12 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
     @get:Input
     abstract val buildArgs: ListProperty<String>
+
+    /** Windows only: an application manifest to embed instead of the plugin's own. */
+    @get:InputFile
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val windowsManifest: RegularFileProperty
 
     @get:OutputDirectory
     abstract val destinationDir: DirectoryProperty
@@ -283,6 +291,14 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         // be rewritten here, so it is the C++ library's copy that loses its guard instead.
         linker("/NODEFAULTLIB:vcruntime.lib", "libvcruntime.lib", "/NODEFAULTLIB:msvcprt.lib", "/NODEFAULTLIB:libcpmt.lib")
         linker(rewritten(msvcLibrary("libcpmt.lib"), into = "msvc").absolutePath)
+        // Without a manifest a process is DPI unaware, and Windows draws the window at 96 DPI
+        // and stretches the bitmap to a scaled display, which blurs the text. What this one
+        // declares is what the JDK's own java.exe declares. Only one can be embedded, so an
+        // application that brings its own leaves this out.
+        val manifest = windowsManifest.orNull?.asFile
+            ?: workDir.resolve("windows-app.manifest")
+                .apply { writeText(resourceText("windows-app.manifest")) }
+        linker("/MANIFEST:EMBED", "/MANIFESTINPUT:${manifest.absolutePath}")
         // No opengl32.lib: skiko defines the few OpenGL entry points it calls itself and
         // resolves them from opengl32.dll at run time, so the import library defines them twice.
         return linked to link

@@ -16,6 +16,8 @@ jobs:
       - name: Run java from home paths of several lengths
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
           $zip = "$env:RUNNER_TEMP\c21.zip"
           # Each base is the directory the archive is unpacked into. The archive has one
           # top-level folder (jdk21.x.y_z), so the Java home is one level deeper.
@@ -25,12 +27,12 @@ jobs:
           )
           foreach ($p in $prefixes) {
             Write-Host "=== unpack dir length $($p.Length): $p"
-            New-Item -ItemType Directory -Force -Path $p | Out-Null
+            [System.IO.Directory]::CreateDirectory($p) | Out-Null
             & 7z x -y -bso0 -bsp0 "-o$p" $zip
-            $home21 = (Get-ChildItem -Directory $p | Select-Object -First 1).FullName
+            $home21 = [System.IO.Directory]::GetDirectories($p)[0]
             Write-Host "java home length $($home21.Length): $home21"
             foreach ($f in @('bin\server\jvm.dll','bin\server\classes.jsa','bin\server\classes_nocoops.jsa','lib\modules')) {
-              $full = Join-Path $home21 $f
+              $full = "$home21\$f"
               Write-Host ("  {0,4} {1} exists={2}" -f $full.Length, $f, [System.IO.File]::Exists($full))
             }
             Write-Host "--- stdout and stderr of java -Xmx32m -Xms32m -version, kept apart"
@@ -40,6 +42,6 @@ jobs:
             Write-Host "combined: $err"
             Write-Host "--- -Xshare:on (fails when the CDS archive cannot be opened)"
             & "$home21\bin\java.exe" -Xmx32m -Xms32m -Xshare:on -version 2>&1 | Out-String | Write-Host
-            Remove-Item -Recurse -Force 'D:\a\compose-multiplatform' -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -Force 'D:\a\compose-multiplatform-extended\compose-multiplatform-extended\gradle-plugins' -ErrorAction SilentlyContinue
+            cmd /c rd /s /q "D:\a\compose-multiplatform" 2>$null
+            cmd /c rd /s /q "D:\a\compose-multiplatform-extended\compose-multiplatform-extended\gradle-plugins" 2>$null
           }

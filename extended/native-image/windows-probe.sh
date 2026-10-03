@@ -4,6 +4,15 @@
 #   B  skiko's JVM natives as a static archive, built on this runner
 #   C  packageNativeImage, the plugin's single-executable path
 set -uo pipefail
+# A Developer prompt puts C:\Windows\System32 ahead of Git's /usr/bin, and `bash` there
+# is WSL's launcher. Nested scripts run through "$BASH" so this is a warning, not a stop.
+case "$(command -v bash)" in
+    /c/[Ww][Ii][Nn][Dd][Oo][Ww][Ss]/[Ss]ystem32/* | /c/WINDOWS/System32/*)
+        echo "warning: 'bash' resolves to $(command -v bash), which is WSL's launcher." >&2
+        echo "         Put Git's /usr/bin before System32 on PATH if a nested script fails." >&2
+        ;;
+esac
+
 out="$PWD/build/probe"
 mkdir -p "$out"
 G="$(cygpath -u "$GRAALVM_HOME")"
@@ -32,7 +41,7 @@ log "native-image exit=$?"
 [[ -f "$out/stock/hello.exe" ]] && run_check "$out/stock" hello.exe
 
 log "== B: static skiko"
-bash ../../../core-extended/extended/skiko/build-skiko-static-jvm.sh "$(cygpath -u "$RUNNER_TEMP")/skiko-static" > "$out/skiko-static.log" 2>&1
+"$BASH" ../../../core-extended/extended/skiko/build-skiko-static-jvm.sh "$(cygpath -u "$RUNNER_TEMP")/skiko-static" > "$out/skiko-static.log" 2>&1
 log "skiko static exit=$?"
 tail -3 "$out/skiko-static.log" >> "$out/summary.txt"
 skiko_out="$(cygpath -u "$RUNNER_TEMP")/skiko-static/out/windows-x64"

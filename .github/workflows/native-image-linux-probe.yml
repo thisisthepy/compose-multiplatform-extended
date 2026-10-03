@@ -5,17 +5,29 @@ name: native-image Linux probe
 
 on:
   workflow_dispatch:
+    inputs:
+      core_ref:
+        description: compose-multiplatform-core-extended ref for its Compose libraries and extended/skiko
+        default: extended
   push:
     branches: [ feature/native-image-linux ]
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 300
     env:
       NIK_URL: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-linux-amd64.tar.gz
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space
+        # The core fork's checkout and its build need the room. The Android SDK stays: its
+        # build configures the Android targets even when it publishes the desktop one only.
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell
+          df -h /
 
       - uses: actions/setup-java@v4
         with:
@@ -30,13 +42,35 @@ jobs:
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev \
             libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk
 
-      - name: skiko's build scripts from the core fork
+      - name: The core fork, for its Compose libraries and skiko's build scripts
         uses: actions/checkout@v4
         with:
           repository: thisisthepy/compose-multiplatform-core-extended
-          ref: feature/static-skiko-linux
+          ref: ${{ inputs.core_ref || 'extended' }}
           path: core-extended
-          sparse-checkout: extended/skiko
+
+      - name: Configure Gradle for this runner
+        # The core fork's build asks for a heap sized for a workstation; this one has 16GB.
+        run: |
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/gradle.properties <<EOF
+          org.gradle.workers.max=4
+          org.gradle.jvmargs=-Xmx10g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8
+          kotlin.compiler.execution.strategy=in-process
+          EOF
+
+      - name: Compose libraries from the core fork to the local repository
+        # The plugin's aliases (compose.desktop.currentOs and the rest) name the core fork's
+        # libraries, org.thisisthepy.compose.*, which nothing publishes yet. The desktop
+        # target and the root metadata of every Compose and Material 3 module, as a
+        # development build: -ext.1-dev, the version the plugin below is built to ask for.
+        working-directory: core-extended
+        run: |
+          export ANDROIDX_JDK21="$JAVA_HOME"
+          ./gradlew --no-daemon :mpp:publishComposeJbToMavenLocal \
+            -Pcompose.platforms=jvm \
+            -Pjetbrains.publication.libraries=COMPOSE,COMPOSE_MATERIAL3 \
+            -Pextended.publication.dev=true
 
       - name: Liberica NIK 25 Full
         run: |
@@ -48,7 +82,11 @@ jobs:
 
       - name: Plugin to the local repository
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+        run: >
+          ./gradlew --no-daemon -q :compose:publishToMavenLocal
+          -Pdeploy.version=1.11.1-ext.1-dev
+          -Pcompose.version=1.11.1-ext.1-dev
+          -Pcompose.material3.version=1.11.0-alpha07-ext.1-dev
 
       - name: Probe
         working-directory: extended/native-image/hello

@@ -12,7 +12,65 @@ on:
       - '.github/workflows/gradle-plugin.yml'
 
 jobs:
+  # The plugin's aliases, and so the test projects, name the Compose libraries of
+  # thisisthepy/compose-multiplatform-core-extended (org.thisisthepy.compose.*), which nothing
+  # publishes yet. They are built once per runner system, for the targets the tests on that
+  # system build, and handed to the test jobs as a local Maven repository.
+  compose-libraries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platforms: jvm,js,wasmJs
+          - os: macos-26-xlarge
+            platforms: jvm,js,wasmJs,iosArm64,iosSimulatorArm64,macosArm64
+          - os: windows-2022
+            platforms: jvm,js,wasmJs
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: The core fork
+        uses: actions/checkout@v5
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: extended
+          path: core-extended
+
+      - name: Setup JDK 21 for the core fork
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'corretto'
+          java-version: '21'
+
+      - name: Compose libraries to the local repository
+        working-directory: core-extended
+        # The version the plugin asks for by default (gradle-plugins/gradle.properties).
+        run: |
+          export ANDROIDX_JDK21="$JAVA_HOME"
+          ./gradlew --no-daemon :mpp:publishComposeJbToMavenLocal \
+            -Pcompose.platforms=${{ matrix.platforms }} \
+            -Pjetbrains.publication.libraries=COMPOSE,COMPOSE_MATERIAL3 \
+            "-Pjetbrains.publication.version.COMPOSE=$(sed -n 's/^compose.version=//p' ../gradle-plugins/gradle.properties)" \
+            "-Pjetbrains.publication.version.COMPOSE_MATERIAL3=$(sed -n 's/^compose.material3.version=//p' ../gradle-plugins/gradle.properties)"
+
+      - name: Keep them for the tests
+        run: tar -C ~/.m2/repository -cf compose-libraries.tar org/thisisthepy
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compose-libraries-${{ matrix.os }}
+          path: compose-libraries.tar
+          retention-days: 3
+
   test-gradle-plugin:
+    needs: compose-libraries
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +81,14 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: compose-libraries-${{ matrix.os }}
+
+      - name: Compose libraries into the local repository
+        shell: bash
+        run: mkdir -p ~/.m2/repository && tar -C ~/.m2/repository -xf compose-libraries.tar
 
       - name: Setup JDK 25
         uses: actions/setup-java@v4

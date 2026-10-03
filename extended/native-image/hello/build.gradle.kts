@@ -4,12 +4,14 @@
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1-extended-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 
+// The libraries are compose-multiplatform-core-extended's, built locally as a development build
+// (-Pextended.publication.dev=true), which is what the plugin above is built to ask for.
 dependencies {
     implementation(compose.desktop.currentOs)
-    implementation("org.jetbrains.compose.material3:material3:1.9.0")
+    implementation("org.thisisthepy.compose.material3:material3:1.11.0-alpha07-ext.1-dev")
 }
 
 compose.desktop.application {

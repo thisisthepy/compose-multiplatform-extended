@@ -19,6 +19,21 @@ compose.desktop.application {
 ./gradlew packageNativeImage    # build/compose/native-image/main/<name>
 ```
 
+The plugin is this fork's, `id("org.thisisthepy.compose")`, and its aliases
+(`compose.desktop.currentOs` and the rest) resolve to compose-multiplatform-core-extended's
+libraries, `org.thisisthepy.compose.*` at `<upstream version>-ext.<N>`; that repository's
+`extended/COORDINATES.md` lists them. Nothing of either is published yet, so both go to the
+local Maven repository first, as development builds, which is what the probe workflows do:
+
+```
+# in compose-multiplatform-core-extended (JDK 21 in ANDROIDX_JDK21)
+./gradlew :mpp:publishComposeJbToMavenLocal -Pcompose.platforms=jvm \
+    -Pjetbrains.publication.libraries=COMPOSE,COMPOSE_MATERIAL3 -Pextended.publication.dev=true
+# in gradle-plugins
+./gradlew :compose:publishToMavenLocal -Pdeploy.version=1.11.1-ext.1-dev \
+    -Pcompose.version=1.11.1-ext.1-dev -Pcompose.material3.version=1.11.0-alpha07-ext.1-dev
+```
+
 The agent writes its metadata on a clean exit, so close the application rather than kill
 it. `hello/` closes itself when `HELLO_SELF_CHECK` names a PNG to render into, which is how
 the run needs nobody at the keyboard.
@@ -114,7 +129,8 @@ What it took, all in `windowsLink` and the static skiko archive:
 
 ## Running the Windows probe locally
 
-`extended/native-image/windows-probe.sh` is what CI runs, and it works from Git Bash
+`extended/native-image/windows-probe.sh` is what CI runs, after the two local publications
+above, and it works from Git Bash
 started inside an x64 Native Tools Command Prompt, with LLVM's `clang-cl` on PATH (skiko
 compiles its Windows bindings with it; `winget install LLVM.LLVM`). Put Git's `/usr/bin`
 ahead of `C:\Windows\System32` on PATH before running it: `vcvars64.bat` prepends System32,

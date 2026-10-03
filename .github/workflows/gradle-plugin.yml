@@ -45,9 +45,19 @@ jobs:
             caches/jars-9
             caches/transforms-3
 
+      # This repository's name makes the workspace path 18 characters longer than upstream's,
+      # and the JDKs the integration tests provision unpack so deep under it that java.exe
+      # fails with "Path length exceeds maximum length (PATH_MAX)" before it can load
+      # bin\server\jvm.dll. A drive letter for the workspace takes 64 characters off.
+      - name: Shorten the workspace path on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          subst X: "$env:GITHUB_WORKSPACE"
+
       - name: Test Gradle plugin
         shell: bash
-        working-directory: gradle-plugins
+        working-directory: ${{ runner.os == 'Windows' && 'X:\gradle-plugins' || 'gradle-plugins' }}
         run: |
           ./gradlew --continue check -Pcompose.tests.gradle.versions=${{ matrix.gradle }} -Pcompose.tests.agp.versions=${{ matrix.agp }}
 

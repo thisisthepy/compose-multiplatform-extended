@@ -11,15 +11,18 @@ plugins {
     alias(libs.plugins.download)
 }
 
+// The ID is this fork's, not JetBrains': a build that applies org.thisisthepy.compose gets this
+// plugin and the libraries it was built for, and one that applies org.jetbrains.compose still
+// gets JetBrains'. The implementation class and the compose { } DSL are JetBrains' unchanged.
 gradlePluginConfig {
-    pluginId = "org.jetbrains.compose"
+    pluginId = BuildProperties.group
     implementationClass = "org.jetbrains.compose.ComposePlugin"
     pluginPortalTags = listOf("ui-framework")
 }
 
 mavenPublicationConfig {
-    displayName = "JetBrains Compose Gradle Plugin"
-    description = "JetBrains Compose Gradle plugin for easy configuration"
+    displayName = "Compose Gradle Plugin (thisisthepy)"
+    description = "The Compose Multiplatform Gradle plugin, configured for thisisthepy/compose-multiplatform-core-extended"
     artifactId = "compose-gradle-plugin"
 }
 
@@ -29,6 +32,9 @@ val buildConfig = tasks.register("buildConfig", GenerateBuildConfig::class.java)
     classFqName.set("org.jetbrains.compose.ComposeBuildConfig")
     generatedOutputDir.set(buildConfigDir)
     fieldsToGenerate.put("composeVersion", BuildProperties.composeVersion(project))
+    fieldsToGenerate.put("composeUpstreamVersion", BuildProperties.composeUpstreamVersion(project))
+    fieldsToGenerate.put("composeLibrariesGroup", BuildProperties.librariesGroup)
+    fieldsToGenerate.put("composeGradlePluginGroup", BuildProperties.group)
     fieldsToGenerate.put("composeMaterial3Version", BuildProperties.composeMaterial3Version(project))
     fieldsToGenerate.put("composeGradlePluginVersion", BuildProperties.deployVersion(project))
     fieldsToGenerate.put("composeHotReloadVersion", libs.plugin.hot.reload.get().version!!)
@@ -210,6 +216,8 @@ configureAllTests {
     dependsOn(":publishToMavenLocal")
     systemProperty("compose.tests.compose.gradle.plugin.version", BuildProperties.deployVersion(project))
     systemProperty("compose.tests.compose.version", BuildProperties.composeVersion(project))
+    systemProperty("compose.tests.compose.upstream.version", BuildProperties.composeUpstreamVersion(project))
+    systemProperty("compose.tests.compose.material3.version", BuildProperties.composeMaterial3Version(project))
     val summaryDir = project.layout.buildDirectory.get().asFile.resolve("test-summary")
     systemProperty("compose.tests.summary.file", summaryDir.resolve("$name.md").absolutePath)
     systemProperties(project.properties.filter { it.key.startsWith("compose.") })

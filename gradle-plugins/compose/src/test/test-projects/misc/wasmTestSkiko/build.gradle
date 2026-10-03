@@ -1,7 +1,7 @@
 plugins {
     id "org.jetbrains.kotlin.multiplatform"
     id "org.jetbrains.kotlin.plugin.compose"
-    id "org.jetbrains.compose"
+    id "org.thisisthepy.compose"
 }
 
 kotlin {
@@ -17,7 +17,7 @@ kotlin {
         commonTest {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.compose.ui:ui-test:COMPOSE_VERSION_PLACEHOLDER")
+                implementation("org.thisisthepy.compose.ui:ui-test:COMPOSE_VERSION_PLACEHOLDER")
             }
         }
     }

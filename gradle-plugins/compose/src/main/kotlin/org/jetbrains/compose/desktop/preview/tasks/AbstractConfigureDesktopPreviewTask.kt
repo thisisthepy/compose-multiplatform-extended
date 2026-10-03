@@ -7,6 +7,7 @@ import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.*
 import org.gradle.work.DisableCachingByDefault
+import org.jetbrains.compose.ComposeBuildConfig
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.desktop.ui.tooling.preview.rpc.*
 import org.jetbrains.compose.internal.utils.*
@@ -49,7 +50,7 @@ abstract class AbstractConfigureDesktopPreviewTask : AbstractComposeDesktopTask(
     @get:Classpath
     internal val uiTooling: FileCollection =
         project.detachedComposeDependency(
-            groupId = "org.jetbrains.compose.ui",
+            groupId = "${ComposeBuildConfig.composeLibrariesGroup}.ui",
             artifactId = "ui-tooling-desktop",
         ).excludeTransitiveDependencies()
 

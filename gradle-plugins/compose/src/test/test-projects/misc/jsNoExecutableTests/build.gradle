@@ -1,7 +1,7 @@
 plugins {
     id "org.jetbrains.kotlin.multiplatform"
     id "org.jetbrains.kotlin.plugin.compose"
-    id "org.jetbrains.compose"
+    id "org.thisisthepy.compose"
 }
 
 kotlin {
@@ -9,14 +9,14 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            api("org.jetbrains.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
-            api("org.jetbrains.compose.ui:ui:COMPOSE_VERSION_PLACEHOLDER")
-            api("org.jetbrains.compose.foundation:foundation:COMPOSE_VERSION_PLACEHOLDER")
+            api("org.thisisthepy.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
+            api("org.thisisthepy.compose.ui:ui:COMPOSE_VERSION_PLACEHOLDER")
+            api("org.thisisthepy.compose.foundation:foundation:COMPOSE_VERSION_PLACEHOLDER")
         }
 
         commonTest.dependencies {
             implementation(kotlin("test"))
-            implementation("org.jetbrains.compose.ui:ui-test:COMPOSE_VERSION_PLACEHOLDER")
+            implementation("org.thisisthepy.compose.ui:ui-test:COMPOSE_VERSION_PLACEHOLDER")
         }
     }
 }

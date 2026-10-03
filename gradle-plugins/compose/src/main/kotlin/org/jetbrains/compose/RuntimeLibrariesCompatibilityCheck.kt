@@ -77,9 +77,18 @@ private fun KotlinTarget.configureRuntimeLibrariesCompatibilityCheck(extension: 
 @DisableCachingByDefault(because = "Not worth caching")
 internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
     private companion object {
+        // The fork's libraries, which the plugin's version is expected of.
         val composeLibrariesForCheck = setOf(
-            "org.jetbrains.compose.foundation:foundation",
-            "org.jetbrains.compose.ui:ui"
+            "${ComposeBuildConfig.composeLibrariesGroup}.foundation:foundation",
+            "${ComposeBuildConfig.composeLibrariesGroup}.ui:ui"
+        )
+
+        // JetBrains' builds of the same libraries. They hold the same classes as the fork's,
+        // under a group Gradle cannot match to the fork's, so any version of them next to the
+        // fork's is a second copy rather than a version to align.
+        val jetBrainsLibrariesForCheck = mapOf(
+            "org.jetbrains.compose.foundation:foundation" to "${ComposeBuildConfig.composeLibrariesGroup}.foundation:foundation",
+            "org.jetbrains.compose.ui:ui" to "${ComposeBuildConfig.composeLibrariesGroup}.ui:ui",
         )
         val skikoLibraryForCheck = "org.jetbrains.skiko:skiko"
 
@@ -123,10 +132,13 @@ internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
         val dependencies = allDependencies.get().filterNot { it.isExcludedBy(excludes) }
         val composeLibraries = dependencies
             .mapNotNull { it.selected.moduleVersion }
-            .filter { lib -> "${lib.group}:${lib.name}" in composeLibrariesForCheck }
+            .filter { lib ->
+                val module = "${lib.group}:${lib.name}"
+                module in composeLibrariesForCheck || module in jetBrainsLibrariesForCheck
+            }
             .distinctBy { lib -> "${lib.group}:${lib.name}:${lib.version}" }
         val composeInconsistentVersions = composeLibraries.filter { lib ->
-            lib.version != expectedRuntimeVersion
+            "${lib.group}:${lib.name}" in jetBrainsLibrariesForCheck || lib.version != expectedRuntimeVersion
         }
         if (composeInconsistentVersions.isNotEmpty()) {
             logger.warn(
@@ -179,7 +191,9 @@ internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
     ): String = buildString {
         appendLine("w: Compose Multiplatform runtime dependencies' versions don't match with plugin version.")
         composeInconsistentVersions.forEach { library ->
-            appendLine("    expected: '${library.group}:${library.name}:$expectedVersion'")
+            val expectedModule = jetBrainsLibrariesForCheck["${library.group}:${library.name}"]
+                ?: "${library.group}:${library.name}"
+            appendLine("    expected: '$expectedModule:$expectedVersion'")
             appendLine("    actual:   '${library.group}:${library.name}:${library.version}'")
             appendLine()
         }

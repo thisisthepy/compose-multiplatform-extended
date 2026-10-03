@@ -19,6 +19,8 @@ data class TestEnvironment(
     val agpVersion: String = TestProperties.agpVersion,
     val composeGradlePluginVersion: String = TestProperties.composeGradlePluginVersion,
     val composeVersion: String = TestProperties.composeVersion,
+    val composeUpstreamVersion: String = TestProperties.composeUpstreamVersion,
+    val composeMaterial3Version: String = TestProperties.composeMaterial3Version,
     val mokoResourcesPluginVersion: String = "0.23.0",
     val composeCompilerPlugin: String? = null,
     val composeCompilerArgs: String? = null,
@@ -29,6 +31,8 @@ data class TestEnvironment(
     private val placeholders = linkedMapOf(
         "COMPOSE_GRADLE_PLUGIN_VERSION_PLACEHOLDER" to composeGradlePluginVersion,
         "COMPOSE_VERSION_PLACEHOLDER" to composeVersion,
+        "COMPOSE_UPSTREAM_VERSION_PLACEHOLDER" to composeUpstreamVersion,
+        "COMPOSE_MATERIAL3_VERSION_PLACEHOLDER" to composeMaterial3Version,
         "KOTLIN_VERSION_PLACEHOLDER" to kotlinVersion,
         "AGP_VERSION_PLACEHOLDER" to agpVersion,
         "COMPOSE_COMPILER_PLUGIN_PLACEHOLDER" to composeCompilerPlugin,

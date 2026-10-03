@@ -16,7 +16,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['ubuntu-24.04', 'macos-26-xlarge', 'windows-2022']
+        # Upstream runs macOS on macos-26-xlarge, a paid larger runner this repository's
+        # account cannot start: those jobs end before their first step. The standard
+        # arm64 runner passes the same suite.
+        os: ['ubuntu-24.04', 'macos-26', 'windows-2022']
         gradle: ['9.3.1', '9.5.0']
         agp: ['9.1.1', '9.2.0']
     runs-on: ${{ matrix.os }}

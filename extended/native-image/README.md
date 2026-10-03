@@ -59,9 +59,19 @@ system frameworks. Copied alone into an empty directory it opens its window, and
 self-check draws the same content through Skia offscreen into a PNG byte for byte the one the
 JVM run draws.
 
+## Running the Windows probe locally
+
+`extended/native-image/windows-probe.sh` is what CI runs, and it works from Git Bash
+started inside an x64 Native Tools Command Prompt. Put Git's `/usr/bin` ahead of
+`C:\Windows\System32` on PATH before running it: `vcvars64.bat` prepends System32, where
+`bash` is WSL's launcher rather than an interpreter, and a nested script invoked as `bash`
+would run under WSL and fail.
+
 ## Not yet
 
-- Windows and Linux. On Windows the JDK's AWT is not shipped as static archives by GraalVM,
-  which is the open question for a single Windows executable.
+- Windows and Linux. Windows is being brought up on the `ci/windows-native-image-probe`
+  branch: Liberica NIK 25 Full does ship the JDK's AWT as static archives on Windows
+  (`lib/static/windows-amd64/awt.lib` and the six beside it), so what is left there is
+  linking Skia's static C runtime against the JDK's DLL one, not a missing archive.
 - skiko's static archive is built by a script beside the core fork rather than resolved from a
   repository.

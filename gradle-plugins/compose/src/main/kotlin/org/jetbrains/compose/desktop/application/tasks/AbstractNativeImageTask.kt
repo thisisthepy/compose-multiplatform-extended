@@ -234,18 +234,25 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     /**
      * Windows: the JDK's static libraries are built against the C runtime DLL (/MD), and
      * JetBrains' Skia against the static one (/MT). The MSVC linker refuses to mix them on a
-     * guard each object carries, `/FAILIFMISMATCH:"RuntimeLibrary=..."`. The guard is there for
-     * code that hands C runtime objects across the boundary (a FILE*, a heap pointer one side
-     * frees), and Skia and the JDK share none: they meet only through skiko's JNI calls and
-     * JAWT's window handle. So copies of skiko's and Skia's libraries are made with the guard
-     * and their static runtime defaults blanked out, and the image links the DLL runtime.
+     * guard each C++ object carries, `/FAILIFMISMATCH:"RuntimeLibrary=..."`. The guard is there
+     * for code that hands C runtime objects across the boundary (a FILE*, a heap pointer one
+     * side frees), and Skia and the JDK share none: they meet only through skiko's JNI calls
+     * and JAWT's window handle. So every C++ library is linked from a copy with the guard
+     * blanked out, and Skia's copies also lose their static runtime defaults.
+     *
+     * The runtime that results: the UCRT from the DLL, which is part of Windows 10 and later,
+     * and vcruntime and the C++ standard library linked in, because a clean Windows has no
+     * VCRUNTIME140.dll or MSVCP140.dll. The JDK's objects call the C++ library through
+     * `__imp_` pointers, and the linker binds those to the linked-in definitions.
      */
     private fun windowsLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
         val relinked = workDir.resolve("relinked").apply { mkdirs() }
-        fun rewritten(library: File): File = relinked.resolve(library.name).also { copy ->
-            copy.writeBytes(blankStaticRuntimeDirectives(library.readBytes()))
+        // The JDK's and Skia's libraries in separate directories, as both could name one freetype.lib.
+        fun rewritten(library: File, into: String = "skia"): File = relinked.resolve("$into/${library.name}").also { copy ->
+            copy.parentFile.mkdirs()
+            copy.writeBytes(blankRuntimeDirectives(library.readBytes()))
         }
         val linked = listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
@@ -258,7 +265,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
         for (archive in Platform.WindowsX64.staticJdkArchives) {
-            linker("/WHOLEARCHIVE:${staticJdk.resolve(archive)}")
+            linker("/WHOLEARCHIVE:${rewritten(staticJdk.resolve(archive), into = "jdk")}")
         }
         linker("/WHOLEARCHIVE:${rewritten(skikoArchive)}")
         skiaArchives.sortedBy { if (it.name == "skia.lib") 0 else 1 }.forEach { linker(rewritten(it).absolutePath) }
@@ -266,22 +273,36 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (library in listOf(
             "user32", "gdi32", "ole32", "oleaut32", "imm32", "shell32", "advapi32", "comdlg32", "winspool",
             "uuid", "d3d12", "dxgi", "d3dcompiler", "dxguid", "dwrite", "usp10", "fontsub", "windowscodecs",
-            "opengl32", "dwmapi", "uxtheme", "ws2_32", "bcrypt",
+            "dwmapi", "uxtheme", "ws2_32", "bcrypt", "shlwapi", "winmm", "comctl32", "propsys",
         )) {
             linker("$library.lib")
         }
         linker("/EXPORT:JNI_OnLoad_skiko")
+        // vcruntime and the C++ library linked in rather than imported; see above. GraalVM
+        // adds libraries of its own built against the DLL runtime (sunmscapi.lib) that cannot
+        // be rewritten here, so it is the C++ library's copy that loses its guard instead.
+        linker("/NODEFAULTLIB:vcruntime.lib", "libvcruntime.lib", "/NODEFAULTLIB:msvcprt.lib", "/NODEFAULTLIB:libcpmt.lib")
+        linker(rewritten(msvcLibrary("libcpmt.lib"), into = "msvc").absolutePath)
+        // No opengl32.lib: skiko defines the few OpenGL entry points it calls itself and
+        // resolves them from opengl32.dll at run time, so the import library defines them twice.
         return linked to link
     }
 
+    /** A library from the MSVC installation, found on LIB the way the linker finds it. */
+    private fun msvcLibrary(name: String): File =
+        (System.getenv("LIB") ?: "").split(';').filter { it.isNotBlank() }
+            .map { File(it, name) }.firstOrNull { it.isFile }
+            ?: error("$name is not in any directory on LIB; run from a Developer prompt or after vcvars64.bat")
+
     /**
-     * The same bytes with every static C runtime directive blanked to spaces: the
-     * `RuntimeLibrary` mismatch guard and the default libraries of the static runtime. Blanked
+     * The same bytes with the C runtime directives blanked to spaces: the `RuntimeLibrary`
+     * mismatch guard, either value, and the default libraries of the static runtime. Blanked
      * rather than removed, so no offset in the file moves.
      */
-    private fun blankStaticRuntimeDirectives(bytes: ByteArray): ByteArray {
+    private fun blankRuntimeDirectives(bytes: ByteArray): ByteArray {
         val directives = listOf(
             "/FAILIFMISMATCH:\"RuntimeLibrary=MT_StaticRelease\"",
+            "/FAILIFMISMATCH:\"RuntimeLibrary=MD_DynamicRelease\"",
             "/DEFAULTLIB:\"LIBCMT\"",
             "/DEFAULTLIB:\"libcpmt\"",
             "/DEFAULTLIB:\"LIBCPMT\"",

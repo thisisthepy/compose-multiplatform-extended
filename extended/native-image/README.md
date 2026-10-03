@@ -95,10 +95,36 @@ holds nothing else. Its `NEEDED` entries are `libz`, `libstdc++`, `libGL`, `libX
 `426c589e...b0aa`), in each of three runs. Under Xvfb skiko finds no GL context and falls back
 to its software renderer, in the JVM run and in the executable alike.
 
+## Measured on Windows x64 (2026-10-03, GitHub windows-latest runner, NIK 25.0.4.1)
+
+`hello` built by `packageNativeImage` is one 98820096 byte executable; the output directory
+holds nothing else. It imports only Windows' own DLLs and the UCRT (`api-ms-win-crt-*`), which
+is part of Windows 10 and later: no `VCRUNTIME140`, no `MSVCP140`, no `awt.dll`, no `jvm.dll`.
+Run alone from an empty directory, its self-check PNG is byte for byte the one the JVM run
+draws (sha256 `82a49a0b...8fb5`). Probe run 37096588029.
+
+What it took, all in `windowsLink` and the static skiko archive:
+- The JDK's static libraries are /MD and JetBrains' Skia /MT. Every C++ library links from a
+  copy with the `RuntimeLibrary` guard blanked, including the C++ standard library, because
+  GraalVM adds libraries of its own built for the DLL runtime. vcruntime and the C++ library
+  are linked in; the UCRT stays the system DLL.
+- No `opengl32.lib`: skiko defines the few OpenGL entry points it uses itself.
+- Skia's ICU data is compiled into the skiko archive, since Skia otherwise looks for
+  `icudtl.dat` beside the executable.
+
+## Running the Windows probe locally
+
+`extended/native-image/windows-probe.sh` is what CI runs, and it works from Git Bash
+started inside an x64 Native Tools Command Prompt, with LLVM's `clang-cl` on PATH (skiko
+compiles its Windows bindings with it; `winget install LLVM.LLVM`). Put Git's `/usr/bin`
+ahead of `C:\Windows\System32` on PATH before running it: `vcvars64.bat` prepends System32,
+where `bash` is WSL's launcher rather than an interpreter, and a nested script invoked as
+`bash` would run under WSL and fail.
+
 ## Not yet
 
-- Windows. On Windows the JDK's AWT is not shipped as static archives by GraalVM,
-  which is the open question for a single Windows executable.
+- Windows on a real display: the probe renders off screen, and opening a window by hand is
+  still to be done.
 - Linux arm64, and Linux on a real display with GL rather than Xvfb.
 - skiko's static archive is built by a script beside the core fork rather than resolved from a
   repository.

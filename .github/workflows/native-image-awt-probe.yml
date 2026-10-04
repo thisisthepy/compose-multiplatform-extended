@@ -1,11 +1,10 @@
 # Finds which classes still make java.awt reachable in a native image of an offscreen
-# Compose application. On its own branch; nothing here gates anything.
+# Compose application. Run by hand; nothing here gates anything. The call tree it writes
+# (reports/call_tree_*.txt) shows every path from main into java.awt.
 name: native-image AWT probe
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ feat/native-image-no-awt ]
 
 jobs:
   probe:

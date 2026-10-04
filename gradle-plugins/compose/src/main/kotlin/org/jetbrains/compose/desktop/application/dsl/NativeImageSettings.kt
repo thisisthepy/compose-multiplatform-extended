@@ -20,6 +20,21 @@ import javax.inject.Inject
  */
 abstract class NativeImageSettings @Inject constructor(objects: ObjectFactory) {
     /**
+     * How the application gets its window. [NativeImageWindowing.AwtFree], the default, links
+     * no part of the JDK's AWT: the application opens its window through the window modules of
+     * compose-multiplatform-core-extended. [NativeImageWindowing.Awt] links the JDK's AWT
+     * toolkit statically and runs an ordinary Compose desktop window.
+     */
+    val windowing: Property<NativeImageWindowing> =
+        objects.property(NativeImageWindowing::class.java).convention(NativeImageWindowing.AwtFree)
+
+    /**
+     * A checkout of compose-multiplatform-core-extended. Its `extended/window` C and
+     * Objective-C sources are compiled into an [NativeImageWindowing.AwtFree] image.
+     */
+    val windowSourcesDirectory: DirectoryProperty = objects.directoryProperty()
+
+    /**
      * The GraalVM that builds the image. On macOS it has to be a distribution that ships the
      * JDK's AWT as static archives, which Liberica NIK Full does. Defaults to GRAALVM_HOME.
      */
@@ -51,4 +66,13 @@ abstract class NativeImageSettings @Inject constructor(objects: ObjectFactory) {
 
     /** Arguments passed to native-image after the ones this plugin needs. */
     val buildArgs: ListProperty<String> = objects.listProperty(String::class.java)
+}
+
+/** The windowing an application built by `packageNativeImage` uses. */
+enum class NativeImageWindowing {
+    /** No AWT in the image. The window comes from the extended window modules. */
+    AwtFree,
+
+    /** The JDK's AWT, linked from static archives. */
+    Awt,
 }

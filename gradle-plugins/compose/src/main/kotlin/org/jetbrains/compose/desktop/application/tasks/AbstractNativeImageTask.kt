@@ -22,6 +22,7 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
+import org.jetbrains.compose.desktop.application.dsl.NativeImageWindowing
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentArch
@@ -79,6 +80,15 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     abstract val skikoStaticDirectory: DirectoryProperty
 
     @get:Input
+    abstract val windowing: Property<NativeImageWindowing>
+
+    /** A compose-multiplatform-core-extended checkout, the source of the window layers' C code. */
+    @get:InputDirectory
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val windowSourcesDirectory: DirectoryProperty
+
+    @get:Input
     abstract val buildArgs: ListProperty<String>
 
     /** Windows only: an application manifest to embed instead of the plugin's own. */
@@ -109,7 +119,8 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             throw GradleException("$nativeImage does not exist. graalvmHome has to name a GraalVM with native-image.")
         }
         val staticJdk = graalvm.resolve(platform.staticJdkDirectory)
-        for (archive in platform.staticJdkArchives) {
+        val awt = windowing.get() == NativeImageWindowing.Awt
+        for (archive in if (awt) platform.staticJdkArchives else emptyList()) {
             if (!staticJdk.resolve(archive).isFile) {
                 throw GradleException(
                     "$graalvm has no ${staticJdk.resolve(archive)}. A single executable links AWT statically, " +
@@ -137,9 +148,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
         val classpath = (runtimeClasspath.files + supportJar).joinToString(File.pathSeparator)
         val (linked, link) = when (platform) {
-            Platform.MacosArm64 -> macosLink(graalvm, staticJdk, skikoArchive, skiaArchives)
-            Platform.WindowsX64 -> windowsLink(graalvm, staticJdk, skikoArchive, skiaArchives)
-            Platform.LinuxX64 -> linuxLink(graalvm, staticJdk, skikoArchive, skiaArchives)
+            Platform.MacosArm64 -> macosLink(graalvm, staticJdk, skikoArchive, skiaArchives, awt)
+            Platform.WindowsX64 -> windowsLink(graalvm, staticJdk, skikoArchive, skiaArchives, awt)
+            Platform.LinuxX64 -> linuxLink(graalvm, staticJdk, skikoArchive, skiaArchives, awt)
         }
 
         val args = mutableListOf(
@@ -165,17 +176,18 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")
     }
 
-    private fun macosLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+    private fun macosLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>, awt: Boolean): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
-        val linked = listOf(
+        val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
+        val linked = if (awt) listOf(
             "awt_lwawt:sun_lwawt|sun_java2d_metal|sun_java2d_opengl|sun_font|sun_awt",
             "osxui:com_apple_laf",
-            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
-        )
+            skikoLibrary,
+        ) else listOf(skikoLibrary)
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
-        for (archive in Platform.MacosArm64.staticJdkArchives) {
+        for (archive in if (awt) Platform.MacosArm64.staticJdkArchives else emptyList()) {
             linker("-Wl,-force_load,${staticJdk.resolve(archive)}")
         }
         linker("-Wl,-force_load,$skikoArchive")
@@ -185,7 +197,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (framework in listOf("Metal", "MetalKit", "IOKit")) {
             linker("-framework", framework)
         }
-        for (library in listOf("awt_lwawt", "osxui", "skiko")) {
+        for (library in if (awt) listOf("awt_lwawt", "osxui", "skiko") else listOf("skiko")) {
             linker("-Wl,-exported_symbol,_JNI_OnLoad_$library")
         }
         return linked to link
@@ -203,29 +215,30 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * (the `java` and `jvm` shims, `awt_headless`, `freetype`); the executable needs none of
      * them, and [removeUnneededLinuxLibraries] takes them away.
      */
-    private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+    private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>, awt: Boolean): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         // sun.font declares a Windows-only native, and the prefix that makes sun.font built in
         // makes the image refer to it.
         val stubs = compileC(graalvm, foreignStubs(skikoArchive, listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows")), "foreign_stubs")
-        val linked = listOf(
+        val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
+        val linked = if (awt) listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
             "awt_xawt",
             "fontmanager:sun_font",
             "javajpeg:com_sun_imageio_plugins_jpeg|sun_awt_image_jpeg",
             "lcms:sun_java2d_cmm_lcms",
             "mlib_image:sun_awt_image_ImagingLib",
-            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
-        )
+            skikoLibrary,
+        ) else listOf(skikoLibrary)
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
         linker("-Wl,--whole-archive", skikoArchive.absolutePath, "-Wl,--no-whole-archive")
         // Skia's archives refer to one another in both directions. FreeType comes after them,
         // so it fills only what neither AWT's font code nor Skia defines.
         linker("-Wl,--start-group")
-        linker(staticJdk.resolve("libjawt.a").absolutePath)
+        if (awt) linker(staticJdk.resolve("libjawt.a").absolutePath)
         skiaArchives.sortedBy { if (it.name == "libskia.a") 0 else 1 }.forEach { linker(it.absolutePath) }
-        for (archive in listOf("libawt_xawt.a", "libawt.a", "libfreetype.a")) {
+        for (archive in if (awt) listOf("libawt_xawt.a", "libawt.a", "libfreetype.a") else emptyList()) {
             linker(staticJdk.resolve(archive).absolutePath)
         }
         linker("-Wl,--end-group")
@@ -257,7 +270,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * VCRUNTIME140.dll or MSVCP140.dll. The JDK's objects call the C++ library through
      * `__imp_` pointers, and the linker binds those to the linked-in definitions.
      */
-    private fun windowsLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+    private fun windowsLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>, awt: Boolean): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
         val relinked = workDir.resolve("relinked").apply { mkdirs() }
@@ -266,17 +279,18 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             copy.parentFile.mkdirs()
             copy.writeBytes(blankRuntimeDirectives(library.readBytes()))
         }
-        val linked = listOf(
+        val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
+        val linked = if (awt) listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
             "fontmanager:sun_font",
             "javajpeg:com_sun_imageio_plugins_jpeg|sun_awt_image_jpeg",
             "lcms:sun_java2d_cmm_lcms",
             "mlib_image:sun_awt_image_ImagingLib",
-            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
-        )
+            skikoLibrary,
+        ) else listOf(skikoLibrary)
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
-        for (archive in Platform.WindowsX64.staticJdkArchives) {
+        for (archive in if (awt) Platform.WindowsX64.staticJdkArchives else emptyList()) {
             linker("/WHOLEARCHIVE:${rewritten(staticJdk.resolve(archive), into = "jdk")}")
         }
         linker("/WHOLEARCHIVE:${rewritten(skikoArchive)}")

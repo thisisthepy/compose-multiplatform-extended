@@ -30,6 +30,8 @@ internal fun JvmApplicationContext.configureNativeImage() {
         imageName.set(settings.imageName.orElse(packageNameProvider))
         this.metadataDirectory.set(metadataDirectory.map { if (it.asFile.isDirectory) it else null })
         skikoStaticDirectory.set(settings.skikoStaticDirectory)
+        windowing.set(settings.windowing)
+        windowSourcesDirectory.set(settings.windowSourcesDirectory)
         buildArgs.set(settings.buildArgs)
         windowsManifest.set(settings.windowsManifest)
         destinationDir.set(project.layout.buildDirectory.dir("compose/native-image/${appDirName}"))

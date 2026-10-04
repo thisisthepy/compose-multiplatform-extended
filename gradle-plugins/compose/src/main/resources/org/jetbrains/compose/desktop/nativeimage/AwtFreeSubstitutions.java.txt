@@ -39,3 +39,15 @@ final class Target_org_jetbrains_skiko_Actuals_awtKt {
     public static void setSystemLookAndFeel() {
     }
 }
+
+/**
+ * skiko's frame watcher, started by every load of Skia, launches a coroutine on its Swing
+ * dispatcher, which posts to AWT's event queue. It only measures frame times for a debug
+ * overlay that an application with no AWT window has no use for.
+ */
+@TargetClass(className = "org.jetbrains.skiko.FrameWatcher", onlyWith = AwtFreeSubstitutions.AwtFree.class)
+final class Target_org_jetbrains_skiko_FrameWatcher {
+    @Substitute
+    public void start() {
+    }
+}

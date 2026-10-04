@@ -51,5 +51,9 @@ jobs:
         if: always()
         with:
           name: probe-${{ matrix.os }}
-          path: extended/native-image/awtfree-probe/build/probe/*.log
+          path: |
+            extended/native-image/awtfree-probe/build/probe/*.log
+            extended/native-image/awtfree-probe/build/probe/summary.txt
+            extended/native-image/awtfree-probe/build/probe/reports/
+            extended/native-image/awtfree-probe/build/probe/jar-metadata/
           if-no-files-found: ignore

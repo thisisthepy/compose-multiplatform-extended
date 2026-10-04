@@ -21,7 +21,9 @@ import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentOS
 import org.jetbrains.compose.internal.utils.joinLowerCamelCase
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBinary
+import org.jetbrains.kotlin.konan.target.Family
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeOutputKind
 import java.util.*
 
@@ -43,7 +45,11 @@ private fun configureNativeApplication(
 ) {
     for (binary in target.binaries) {
         if (binary.outputKind == NativeOutputKind.EXECUTABLE) {
-            configureNativeApplication(project, app, binary, unpackDefaultResources)
+            configureNativeBinary(app, binary)
+            // The .app and dmg are macOS only; Linux packaging is a separate task set.
+            if (target.konanTarget.family == Family.OSX && currentOS == OS.MacOS) {
+                configureNativeApplication(project, app, binary, unpackDefaultResources)
+            }
         }
     }
 }
@@ -100,6 +106,23 @@ private fun configureNativeApplication(
         }
     }
     packager.configure(packaging)
+}
+
+private fun configureNativeBinary(app: NativeApplication, binary: NativeBinary) {
+    val settings = app.binarySettings
+    binary.linkerOpts(
+        *nativeDesktopLinkerOpts(
+            family = binary.target.konanTarget.family,
+            skikoDirectory = settings.nativeSkikoDirectory.asFile.orNull?.absolutePath,
+            linkWindowSystem = settings.linkWindowSystem.get(),
+            extra = settings.linkerOpts.get()
+        ).toTypedArray()
+    )
+    // mingwX64 ends as an MSVC executable; its link step is the MSVC pipeline of the
+    // kotlin-native-desktop plugin and is wired here when that module lands.
+    if (binary is Executable && settings.entryPoint.isPresent) {
+        binary.entryPoint = settings.entryPoint.get()
+    }
 }
 
 private fun AbstractNativeMacApplicationPackageTask.configureNativePackageTask(

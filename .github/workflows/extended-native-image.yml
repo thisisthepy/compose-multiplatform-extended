@@ -107,7 +107,7 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             HELLO_SELF_CHECK="$png" xvfb-run -a timeout 120 "$launcher"
           else
-            HELLO_SELF_CHECK="$png" timeout 120 "$launcher"
+            HELLO_SELF_CHECK="$png" perl -e 'alarm 120; exec @ARGV' "$launcher"
           fi
           test -s "$png"
 
@@ -132,7 +132,6 @@ jobs:
     timeout-minutes: 120
     env:
       SAMPLE_AWTFREE: extended/native-image/hello-awtfree
-      SAMPLE_PLACEHOLDER: extended/native-image/hello
     steps:
       - uses: actions/checkout@v4
 
@@ -189,21 +188,6 @@ jobs:
         shell: bash
         run: bash core-extended/extended/skiko/build-skiko-static-jvm.sh --no-jawt "$RUNNER_TEMP/skiko-static-nojawt"
 
-      # PLACEHOLDER: needs the AWT-full archive until hello-awtfree exists. Removed with the
-      # placeholder steps below.
-      - name: skiko static archive cache (with JAWT, placeholder only)
-        id: skiko-cache-jawt
-        if: steps.sample.outputs.awtfree != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/skiko-static-jawt
-          key: skiko-static-jawt-${{ matrix.name }}-${{ env.CORE_EXTENDED_REF }}
-
-      - name: Build skiko static archive (with JAWT, placeholder only)
-        if: steps.sample.outputs.awtfree != 'true' && steps.skiko-cache-jawt.outputs.cache-hit != 'true'
-        shell: bash
-        run: bash core-extended/extended/skiko/build-skiko-static-jvm.sh "$RUNNER_TEMP/skiko-static-jawt"
-
       # core-extended's window modules to mavenLocal, the way its extended-window-publish
       # workflow does it: Amper rejects two modules both named macos in one project, so each
       # publication is built from a project of the modules it needs.
@@ -235,16 +219,6 @@ jobs:
         working-directory: ${{ env.SAMPLE_AWTFREE }}
         env:
           SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
-        shell: bash
-        run: ./gradlew --no-daemon --info packageNativeImage
-
-      # PLACEHOLDER: builds the existing AWT hello so the cell proves the plugin, NIK and the
-      # skiko archive link end to end until hello-awtfree lands. Delete with the sample.
-      - name: packageNativeImage (PLACEHOLDER, existing hello)
-        if: steps.sample.outputs.awtfree != 'true'
-        working-directory: ${{ env.SAMPLE_PLACEHOLDER }}
-        env:
-          SKIKO_STATIC: ${{ runner.temp }}/skiko-static-jawt/out/${{ matrix.name }}
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
@@ -280,15 +254,15 @@ jobs:
           if [ "${{ steps.sample.outputs.awtfree }}" = true ]; then
             bash extended/native-image/check-native-config.sh core-extended --strict "$SAMPLE_AWTFREE/src/main/native-image/reachability-metadata.json"
           else
-            bash extended/native-image/check-native-config.sh core-extended "$SAMPLE_PLACEHOLDER/src/main/native-image/reachability-metadata.json"
+            bash extended/native-image/check-native-config.sh core-extended extended/native-image/hello-awtfree-link/src/main/native-image/reachability-metadata.json
           fi
 
       - name: Smoke start, Linux (Xvfb)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.sample.outputs.awtfree == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          dir=$([ "${{ steps.sample.outputs.awtfree }}" = true ] && echo "$SAMPLE_AWTFREE" || echo "$SAMPLE_PLACEHOLDER")
+          dir="$SAMPLE_AWTFREE"
           exe=$(find "$dir/build/compose/native-image" -maxdepth 2 -type f -perm -u+x | head -1)
           single="$RUNNER_TEMP/single"; rm -rf "$single"; mkdir -p "$single"; cp "$exe" "$single/app"
           cd "$single"
@@ -298,15 +272,15 @@ jobs:
       # No display session on the macOS runner to draw into, so this starts the executable and
       # lets it quit on its own through the auto-exit variable, as compose-rust's smoke tests do.
       - name: Smoke start, macOS (start and exit)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.sample.outputs.awtfree == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          dir=$([ "${{ steps.sample.outputs.awtfree }}" = true ] && echo "$SAMPLE_AWTFREE" || echo "$SAMPLE_PLACEHOLDER")
+          dir="$SAMPLE_AWTFREE"
           exe=$(find "$dir/build/compose/native-image" -maxdepth 2 -type f -perm -u+x | head -1)
           single="$RUNNER_TEMP/single"; rm -rf "$single"; mkdir -p "$single"; cp "$exe" "$single/app"
           cd "$single"
-          HELLO_SELF_CHECK="$single/self-check.png" timeout 120 ./app
+          HELLO_SELF_CHECK="$single/self-check.png" perl -e 'alarm 120; exec @ARGV' ./app
 
       - uses: actions/upload-artifact@v4
         if: always()

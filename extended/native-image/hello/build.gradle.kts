@@ -14,7 +14,6 @@ dependencies {
 
 compose.desktop.application {
     mainClass = "hello.MainKt"
-    windowing = org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing.Awt
     windowing.set(org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing.Awt)
     nativeImage {
         // Liberica NIK Full and the static Skia archive; see ../README.md.

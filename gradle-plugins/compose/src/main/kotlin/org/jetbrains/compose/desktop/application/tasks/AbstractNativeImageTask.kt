@@ -214,6 +214,8 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             for (framework in listOf("AppKit", "Carbon", "QuartzCore")) {
                 linker("-framework", framework)
             }
+            // Skia and skiko's bindings are C++; with AWT the JDK's archives bring the library in.
+            linker("-lc++")
         }
         for (library in if (awt) listOf("awt_lwawt", "osxui", "skiko") else listOf("skiko")) {
             linker("-Wl,-exported_symbol,_JNI_OnLoad_$library")

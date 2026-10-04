@@ -11,7 +11,7 @@ import java.util.*
 abstract class NativeApplicationDistributions : AbstractDistributions() {
     private val supportedFormats = EnumSet.of(
         TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Exe,
-        TargetFormat.AppImageFile, TargetFormat.Flatpak, TargetFormat.Msix,
+        TargetFormat.Flatpak, TargetFormat.Msix,
     )
 
     override fun targetFormats(vararg formats: TargetFormat) {

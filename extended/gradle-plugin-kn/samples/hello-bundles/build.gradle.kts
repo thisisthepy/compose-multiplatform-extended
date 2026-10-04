@@ -1,7 +1,7 @@
 // The smallest Compose desktop application, packaged as the three bundle formats of the
-// extended plugin: a .AppImage file and a Flatpak on Linux, an unsigned MSIX on Windows.
+// extended plugin: a Flatpak on Linux, an unsigned MSIX on Windows.
 // The extended-bundles workflow builds it. Run the task of your OS:
-//   ./gradlew packageAppImageFile packageFlatpak   (Linux)
+//   ./gradlew packageFlatpak   (Linux)
 //   ./gradlew packageMsix                          (Windows)
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
@@ -25,7 +25,7 @@ compose.desktop.application {
         packageVersion = "1.0.0"
         description = "A window with a button."
         vendor = "Example"
-        targetFormats(TargetFormat.AppImageFile, TargetFormat.Flatpak, TargetFormat.Msix)
+        targetFormats(TargetFormat.Flatpak, TargetFormat.Msix)
         linux {
             appCategory = "Utility"
             flatpak {

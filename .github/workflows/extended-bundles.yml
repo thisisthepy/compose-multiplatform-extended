@@ -1,5 +1,5 @@
-# Builds the AppImage, Flatpak and MSIX target formats of the extended plugin from the
-# hello-bundles sample: the AppImage and the Flatpak on Ubuntu, the MSIX on Windows. The
+# Builds the Flatpak and MSIX target formats of the extended plugin from the
+# hello-bundles sample: the Flatpak on Ubuntu, the MSIX on Windows. The
 # plugin is built from this checkout and published to the local Maven repository, so what is
 # packaged is the code under review. No paths filter: a required check that is skipped blocks
 # the merge. The inherited upstream workflows fail at Setup Prerequisites and are not the gate.
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   linux:
-    name: AppImage and Flatpak
+    name: Flatpak
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -48,38 +48,9 @@ jobs:
         working-directory: gradle-plugins
         run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
 
-      - name: Build the AppImage and the Flatpak
+      - name: Build the Flatpak
         working-directory: extended/gradle-plugin-kn/samples/hello-bundles
-        run: dbus-run-session -- ./gradlew --no-daemon packageAppImageFile packageFlatpak --stacktrace
-
-      - name: Check the AppImage
-        working-directory: extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries
-        run: |
-          image="$(ls main/appimage/*.AppImage)"
-          echo "AppImage: $image"
-          test -f "$image.sha256"
-          (cd "$(dirname "$image")" && sha256sum -c "$(basename "$image").sha256")
-          # A real file, not a directory: the ELF runtime followed by a squashfs image.
-          test -f "$image" && head -c 4 "$image" | grep -q ELF
-          mkdir -p inspect && cd inspect
-          APPIMAGE_EXTRACT_AND_RUN=1 "../$image" --appimage-extract >/dev/null
-          test -x squashfs-root/AppRun
-          test -x squashfs-root/usr/bin/hello-bundles
-          desktop-file-validate squashfs-root/hello-bundles.desktop
-          cat squashfs-root/hello-bundles.desktop
-          test -f squashfs-root/hello-bundles.png
-
-      - name: The AppImage starts
-        working-directory: extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries
-        run: |
-          image="$(realpath main/appimage/*.AppImage)"
-          # Still running when the timeout ends it (exit 124) means the window came up.
-          set +e
-          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a -s "-screen 0 1280x800x24" timeout 25 "$image"
-          status=$?
-          set -e
-          echo "exit status $status"
-          test "$status" -eq 124
+        run: dbus-run-session -- ./gradlew --no-daemon packageFlatpak --stacktrace
 
       - name: Check the Flatpak
         working-directory: extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries
@@ -108,7 +79,6 @@ jobs:
         with:
           name: linux-bundles
           path: |
-            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/appimage/
             extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/flatpak/bundle/
             extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/flatpak/manifest/*.json
             extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/flatpak/manifest/packaging/

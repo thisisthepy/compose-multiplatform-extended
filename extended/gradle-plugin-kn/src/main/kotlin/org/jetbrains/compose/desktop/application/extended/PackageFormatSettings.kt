@@ -8,19 +8,6 @@ package org.jetbrains.compose.desktop.application.extended
 import java.io.File
 
 /**
- * `nativeDistributions { linux { appImage { ... } } }`: settings of the `.AppImage` file
- * (`TargetFormat.AppImageFile`). The name, version, icon, description and category come from
- * `nativeDistributions` and `linux`.
- */
-open class AppImageSettings {
-    /** `appimagetool` to use. Without it the plugin downloads a pinned version and checks its digest. */
-    var appImageTool: File? = null
-
-    /** The directory the downloaded tools are kept in. Defaults to a folder in the project's build directory. */
-    var toolsDirectory: File? = null
-}
-
-/**
  * `nativeDistributions { linux { flatpak { ... } } }`: settings of the Flatpak bundle
  * (`TargetFormat.Flatpak`).
  */

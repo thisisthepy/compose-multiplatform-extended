@@ -23,7 +23,7 @@ import org.jetbrains.compose.desktop.application.dsl.WindowsPlatformSettings
 
 /** The formats this file packages. Upstream's jpackage-based formats are not in it. */
 internal val TargetFormat.isBundleFormat: Boolean
-    get() = this == TargetFormat.AppImageFile || this == TargetFormat.Flatpak || this == TargetFormat.Msix
+    get() = this == TargetFormat.Flatpak || this == TargetFormat.Msix
 
 /**
  * What the AppImage, Flatpak and MSIX tasks need to know about one application, whichever way it
@@ -93,26 +93,12 @@ internal class BundleContext(
     }
 
     fun register(format: TargetFormat): TaskProvider<*> = when (format) {
-        TargetFormat.AppImageFile -> registerAppImage()
         TargetFormat.Flatpak -> registerFlatpak()
         TargetFormat.Msix -> registerMsix()
         else -> error("$format is made by jpackage or by the Kotlin/Native packager, not by the bundle tasks")
     }
 
     private fun linuxIcon(): Provider<RegularFile> = linux.iconFile.orElse(defaultPngIcon)
-
-    private fun registerAppImage(): TaskProvider<*> {
-        val settings = linux.appImage
-        return register<AbstractAppImageFileTask>("package", "AppImageFile") {
-            common(linuxPayload, linuxExecutable, linuxName(), versionFor(linux.packageVersion), TargetFormat.AppImageFile)
-            architecture.set(AppImageNames.architecture(this@BundleContext.architecture))
-            iconFile.set(linuxIcon())
-            appCategory.set(nullable { linux.appCategory ?: linux.menuGroup })
-            mimeTypes.set(project.provider { linux.fileAssociations.map { it.mimeType } })
-            appImageTool.set(nullable { settings.appImageTool })
-            toolsDirectory.set(nullable { settings.toolsDirectory })
-        }
-    }
 
     private fun registerFlatpak(): TaskProvider<*> {
         val settings = linux.flatpak

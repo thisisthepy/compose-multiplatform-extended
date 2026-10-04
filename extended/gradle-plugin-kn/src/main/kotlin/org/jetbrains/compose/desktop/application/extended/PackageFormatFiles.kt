@@ -48,8 +48,6 @@ internal object BundleChecksum {
     }
 }
 
-// region AppImage
-
 internal object AppImageNames {
     /** Anything but letters, digits, `.`, `_` and `-` becomes `_`. */
     fun fileSafe(name: String): String = name.map {
@@ -60,24 +58,7 @@ internal object AppImageNames {
         konanOrOsArch.contains("arm64", ignoreCase = true) || konanOrOsArch.contains("aarch64", ignoreCase = true) -> "aarch64"
         else -> "x86_64"
     }
-
-    /** `<Name>-<version>-<arch>.AppImage`, the shape the AppImage tools expect. */
-    fun fileName(name: String, version: String, arch: String): String = "${fileSafe(name)}-$version-$arch.AppImage"
 }
-
-internal object AppImageFiles {
-    /**
-     * The script the runtime starts. The runtime sets APPDIR to where the image is mounted;
-     * falling back to this file's directory lets the unpacked AppDir run too.
-     */
-    fun appRun(executableRelativePath: String): String =
-        "#!/bin/sh\n" +
-            "APPDIR=\"\${APPDIR:-\$(dirname \"\$(readlink -f \"\$0\")\")}\"\n" +
-            "export APPDIR\n" +
-            "exec \"\$APPDIR/usr/$executableRelativePath\" \"\$@\"\n"
-}
-
-// endregion
 
 // region AppStream
 

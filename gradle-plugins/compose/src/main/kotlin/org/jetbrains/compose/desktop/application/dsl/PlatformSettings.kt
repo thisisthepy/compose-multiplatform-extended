@@ -8,7 +8,6 @@ package org.jetbrains.compose.desktop.application.dsl
 import org.gradle.api.Action
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
-import org.jetbrains.compose.desktop.application.extended.AppImageSettings
 import org.jetbrains.compose.desktop.application.extended.FlatpakSettings
 import org.jetbrains.compose.desktop.application.extended.MsixSettings
 import java.io.File
@@ -105,11 +104,6 @@ abstract class LinuxPlatformSettings : AbstractPlatformSettings() {
     var rpmLicenseType: String? = null
     var debPackageVersion: String? = null
     var rpmPackageVersion: String? = null
-
-    val appImage: AppImageSettings = AppImageSettings()
-    fun appImage(fn: Action<AppImageSettings>) {
-        fn.execute(appImage)
-    }
 
     val flatpak: FlatpakSettings = FlatpakSettings()
     fun flatpak(fn: Action<FlatpakSettings>) {

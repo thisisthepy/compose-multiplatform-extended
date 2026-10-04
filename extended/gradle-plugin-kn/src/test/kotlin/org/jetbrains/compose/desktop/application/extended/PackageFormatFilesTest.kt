@@ -22,7 +22,6 @@ class PackageFormatFilesTest {
 
     @Test
     fun theNewFormatsBelongToTheOperatingSystemsTheyPackageFor() {
-        assertTrue(TargetFormat.AppImageFile.isCompatibleWith(OS.Linux))
         assertTrue(TargetFormat.Flatpak.isCompatibleWith(OS.Linux))
         assertTrue(TargetFormat.Msix.isCompatibleWith(OS.Windows))
         assertFalse(TargetFormat.Msix.isCompatibleWith(OS.Linux))
@@ -30,7 +29,6 @@ class PackageFormatFilesTest {
 
     @Test
     fun theNewFormatsHaveTheFileExtensionOfTheirFile() {
-        assertEquals(".AppImage", TargetFormat.AppImageFile.fileExt)
         assertEquals(".flatpak", TargetFormat.Flatpak.fileExt)
         assertEquals(".msix", TargetFormat.Msix.fileExt)
     }
@@ -39,7 +37,6 @@ class PackageFormatFilesTest {
     fun upstreamsAppImageIsStillTheDirectoryAndIsNotABundleFormat() {
         assertEquals("app", TargetFormat.AppImage.outputDirName)
         assertFalse(TargetFormat.AppImage.isBundleFormat)
-        assertTrue(TargetFormat.AppImageFile.isBundleFormat)
         assertTrue(TargetFormat.Flatpak.isBundleFormat)
         assertTrue(TargetFormat.Msix.isBundleFormat)
         assertFalse(TargetFormat.Msi.isBundleFormat)
@@ -63,26 +60,6 @@ class PackageFormatFilesTest {
         } finally {
             dir.deleteRecursively()
         }
-    }
-
-    // endregion
-
-    // region AppImage
-
-    @Test
-    fun anAppImageFileNameCarriesTheNameVersionAndArchitecture() {
-        assertEquals("My_App-1.2.3-x86_64.AppImage", AppImageNames.fileName("My App", "1.2.3", "x86_64"))
-        assertEquals("aarch64", AppImageNames.architecture("linuxArm64"))
-        assertEquals("aarch64", AppImageNames.architecture("aarch64"))
-        assertEquals("x86_64", AppImageNames.architecture("amd64"))
-    }
-
-    @Test
-    fun appRunStartsTheExecutableFromTheMountPointAndFromAnUnpackedAppDir() {
-        val script = AppImageFiles.appRun("bin/hello")
-        assertTrue(script.startsWith("#!/bin/sh\n"))
-        assertTrue(script.contains("APPDIR=\"\${APPDIR:-\$(dirname \"\$(readlink -f \"\$0\")\")}\""))
-        assertTrue(script.contains("exec \"\$APPDIR/usr/bin/hello\" \"\$@\""))
     }
 
     // endregion

@@ -20,9 +20,6 @@ enum class TargetFormat(
     Exe("exe", OS.Windows),
     Msi("msi", OS.Windows),
 
-    /** A single `.AppImage` file. [AppImage] is an app-image directory. Built by `extended/gradle-plugin-kn`. */
-    AppImageFile("AppImage", OS.Linux),
-
     /** A `.flatpak` bundle, with a manifest for Flathub. Built by `extended/gradle-plugin-kn`. */
     Flatpak("flatpak", OS.Linux),
 
@@ -36,7 +33,6 @@ enum class TargetFormat(
     val outputDirName: String
         get() = when (this) {
             AppImage -> "app"
-            AppImageFile -> "appimage"
             else -> id
         }
 

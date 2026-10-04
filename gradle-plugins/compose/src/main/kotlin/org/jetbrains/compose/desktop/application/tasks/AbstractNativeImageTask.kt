@@ -165,6 +165,16 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             args += "-H:ConfigurationFileDirectories=${it.absolutePath}"
         }
         args += link
+        if (!awt) {
+            // A CEntryPointLiteral is resolved while the image is built, so the classes that
+            // hold the upcall tables have to be initialized then.
+            val upcalls = when (platform) {
+                Platform.MacosArm64 -> listOf("AppKitUpcalls", "AppKitUpcallSlots").map { "org.thisisthepy.compose.window.graalvm.macos.$it" }
+                Platform.LinuxX64 -> listOf("org.thisisthepy.compose.window.graalvm.linux.X11Upcalls")
+                Platform.WindowsX64 -> emptyList()
+            }
+            if (upcalls.isNotEmpty()) args += "--initialize-at-build-time=${upcalls.joinToString(",")}"
+        }
         args += buildArgs.get()
         args += listOf("-o", output.resolve(imageName.get()).absolutePath, mainClass.get())
 

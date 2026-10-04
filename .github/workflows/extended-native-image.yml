@@ -1,0 +1,233 @@
+# The native-image gate for the extended branch: an AWT-free Compose application packaged as
+# one executable on macOS arm64 and Linux x64, then started. There is no paths filter, because
+# this may become a required check and a required check that is skipped blocks the merge.
+#
+# The window modules, skiko's static archive and the plugin are all built here from pinned
+# sources. Bump CORE_EXTENDED_REF to take newer window code.
+name: Extended native image
+
+on:
+  pull_request:
+    branches: [ extended ]
+  workflow_dispatch:
+
+concurrency:
+  group: extended-native-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
+  # extended/skiko come from.
+  CORE_EXTENDED_REF: 7f08736385177d85deebf72888cdef0855cf744c
+  PLUGIN_VERSION: 1.11.1-extended-dev
+  COMPOSE_VERSION: 1.11.1
+  NIK_BASE: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2
+
+jobs:
+  config-check:
+    name: Window config check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            extended/native-image
+            .github
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: extended/window
+      - name: No runtime reflection, upcalls through the table
+        run: |
+          files=$(ls extended/native-image/hello-awtfree/src/main/native-image/reachability-metadata.json 2>/dev/null || true)
+          if [ -n "$files" ]; then
+            bash extended/native-image/check-native-config.sh core-extended --strict $files
+          else
+            echo "hello-awtfree does not exist yet: checking the window sources only"
+            bash extended/native-image/check-native-config.sh core-extended
+          fi
+
+  package:
+    name: Package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-26
+            nik: macos-aarch64
+          - name: linux-x64
+            os: ubuntu-24.04
+            nik: linux-amd64
+          # Kotlin/Native packaging cells go here. The K/N window agent adds them: one per
+          # platform, building the native window modules into an executable and starting it.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      SAMPLE_AWTFREE: extended/native-image/hello-awtfree
+      SAMPLE_PLACEHOLDER: extended/native-image/hello
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: |
+            extended/window
+            extended/skiko
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            build-essential pkg-config xvfb xauth libgl1-mesa-dev libgl1-mesa-dri \
+            libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
+            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq
+
+      - name: Liberica NIK 25 Full
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-${{ matrix.nik }}.tar.gz"
+          mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
+          ni="$(find "$RUNNER_TEMP/nik" -path '*/bin/native-image' -type f | head -1)"
+          home="$(dirname "$(dirname "$ni")")"
+          echo "GRAALVM_HOME=$home" >> "$GITHUB_ENV"
+          "$home/bin/native-image" --version
+
+      - name: Does the AwtFree sample exist
+        id: sample
+        shell: bash
+        run: |
+          if [ -f "$SAMPLE_AWTFREE/build.gradle.kts" ]; then echo "awtfree=true" >> "$GITHUB_OUTPUT"; else echo "awtfree=false" >> "$GITHUB_OUTPUT"; fi
+
+      # skiko without JAWT, for the AWT-free sample. Keyed on the pinned commit, which pins the
+      # script and skiko's revision with it.
+      - name: skiko static archive cache (no JAWT)
+        id: skiko-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/skiko-static-nojawt
+          key: skiko-static-nojawt-${{ matrix.name }}-${{ env.CORE_EXTENDED_REF }}
+
+      - name: Build skiko static archive (no JAWT)
+        if: steps.skiko-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash core-extended/extended/skiko/build-skiko-static-jvm.sh --no-jawt "$RUNNER_TEMP/skiko-static-nojawt"
+
+      # PLACEHOLDER: needs the AWT-full archive until hello-awtfree exists. Removed with the
+      # placeholder steps below.
+      - name: skiko static archive cache (with JAWT, placeholder only)
+        id: skiko-cache-jawt
+        if: steps.sample.outputs.awtfree != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/skiko-static-jawt
+          key: skiko-static-jawt-${{ matrix.name }}-${{ env.CORE_EXTENDED_REF }}
+
+      - name: Build skiko static archive (with JAWT, placeholder only)
+        if: steps.sample.outputs.awtfree != 'true' && steps.skiko-cache-jawt.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash core-extended/extended/skiko/build-skiko-static-jvm.sh "$RUNNER_TEMP/skiko-static-jawt"
+
+      # core-extended's window modules to mavenLocal, the way its extended-window-publish
+      # workflow does it: Amper rejects two modules both named macos in one project, so each
+      # publication is built from a project of the modules it needs.
+      - name: Publish the window modules to mavenLocal
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = macOS ]; then
+            sets="common native/macos|common graalvm/macos"
+          else
+            sets="common graalvm/linux"
+          fi
+          cp project.yaml project.yaml.all
+          IFS='|' read -ra list <<< "$sets"
+          for set in "${list[@]}"; do
+            printf 'modules:\n' > project.yaml
+            for m in $set; do printf '  - %s\n' "$m" >> project.yaml; done
+            ./kotlin publish mavenLocal
+          done
+          cp project.yaml.all project.yaml
+          find ~/.m2/repository/org/thisisthepy/compose/window -name '*.pom' | sort
+
+      - name: Plugin to mavenLocal
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+
+      # The AwtFree sample: packageNativeImage with the no-JAWT archive, then a headless start.
+      - name: packageNativeImage (AwtFree sample)
+        if: steps.sample.outputs.awtfree == 'true'
+        working-directory: ${{ env.SAMPLE_AWTFREE }}
+        env:
+          SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
+        shell: bash
+        run: ./gradlew --no-daemon --info packageNativeImage
+
+      # PLACEHOLDER: builds the existing AWT hello so the cell proves the plugin, NIK and the
+      # skiko archive link end to end until hello-awtfree lands. Delete with the sample.
+      - name: packageNativeImage (PLACEHOLDER, existing hello)
+        if: steps.sample.outputs.awtfree != 'true'
+        working-directory: ${{ env.SAMPLE_PLACEHOLDER }}
+        env:
+          SKIKO_STATIC: ${{ runner.temp }}/skiko-static-jawt/out/${{ matrix.name }}
+        shell: bash
+        run: ./gradlew --no-daemon --info packageNativeImage
+
+      - name: Config check on the generated metadata
+        shell: bash
+        run: |
+          if [ "${{ steps.sample.outputs.awtfree }}" = true ]; then
+            bash extended/native-image/check-native-config.sh core-extended --strict "$SAMPLE_AWTFREE/src/main/native-image/reachability-metadata.json"
+          else
+            bash extended/native-image/check-native-config.sh core-extended "$SAMPLE_PLACEHOLDER/src/main/native-image/reachability-metadata.json"
+          fi
+
+      - name: Smoke start, Linux (Xvfb)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=$([ "${{ steps.sample.outputs.awtfree }}" = true ] && echo "$SAMPLE_AWTFREE" || echo "$SAMPLE_PLACEHOLDER")
+          exe=$(find "$dir/build/compose/native-image" -maxdepth 2 -type f -perm -u+x | head -1)
+          single="$RUNNER_TEMP/single"; rm -rf "$single"; mkdir -p "$single"; cp "$exe" "$single/app"
+          cd "$single"
+          HELLO_SELF_CHECK="$single/self-check.png" xvfb-run -a timeout 120 ./app
+          test -s "$single/self-check.png"
+
+      # No display session on the macOS runner to draw into, so this starts the executable and
+      # lets it quit on its own through the auto-exit variable, as compose-rust's smoke tests do.
+      - name: Smoke start, macOS (start and exit)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=$([ "${{ steps.sample.outputs.awtfree }}" = true ] && echo "$SAMPLE_AWTFREE" || echo "$SAMPLE_PLACEHOLDER")
+          exe=$(find "$dir/build/compose/native-image" -maxdepth 2 -type f -perm -u+x | head -1)
+          single="$RUNNER_TEMP/single"; rm -rf "$single"; mkdir -p "$single"; cp "$exe" "$single/app"
+          cd "$single"
+          HELLO_SELF_CHECK="$single/self-check.png" timeout 120 ./app
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-image-${{ matrix.name }}
+          path: |
+            extended/native-image/*/build/tmp/packageNativeImage/**/*.log
+            extended/native-image/*/build/reports/
+          if-no-files-found: ignore

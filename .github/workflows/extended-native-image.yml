@@ -55,6 +55,22 @@ jobs:
             bash extended/native-image/check-native-config.sh core-extended
           fi
 
+  # Temporary: why GraalVM runs main on a thread that is not the first one. Dispatch only.
+  diag-main-thread:
+    name: diag main thread (temporary)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: NIK and its launcher class
+        shell: bash
+        run: |
+          curl -fsSL -o nik.tar.gz "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64.tar.gz"
+          mkdir nik && tar xzf nik.tar.gz -C nik
+          jar=$(find nik -name svm.jar | head -1); echo "$jar"
+          javap -p -c -cp "$jar" com.oracle.svm.core.JavaMainWrapper | grep -n -i "thread\|RunMainInNewThread\|Darwin\|invoke.*run\|static.*(" | head -80
+          unzip -l "$jar" | grep -i "JavaMainWrapper\|MainThread" | head
+
   plugin-dsl:
     name: Plugin DSL additive
     runs-on: ubuntu-24.04

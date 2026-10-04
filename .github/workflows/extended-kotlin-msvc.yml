@@ -82,7 +82,7 @@ jobs:
         working-directory: extended/native-desktop/hello-plain
         run: |
           set -euo pipefail
-          exe="$(find build/bin -type f \( -name '*.kexe' -o -name 'hello.exe' \) | head -1)"
+          exe="$(find build/bin -type f \( -name '*.kexe' -o -name 'hello.exe' \) -not -path '*.dSYM/*' | head -1)"
           echo "running $exe"
           "$exe" --self-check | tee run.log
           grep -q 'self-check ok' run.log

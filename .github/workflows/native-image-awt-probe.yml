@@ -1,0 +1,55 @@
+# Finds which classes still make java.awt reachable in a native image of an offscreen
+# Compose application. On its own branch; nothing here gates anything.
+name: native-image AWT probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feat/native-image-no-awt ]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            nik: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-linux-amd64.tar.gz
+          - os: macos-26
+            nik: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Liberica NIK 25 Full
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "${{ matrix.nik }}"
+          mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
+          home="$(ls -d "$RUNNER_TEMP"/nik/*/ | head -1)"
+          if [ -d "${home}Contents/Home" ]; then home="${home}Contents/Home/"; fi
+          echo "GRAALVM_HOME=${home%/}" >> "$GITHUB_ENV"
+          "${home}bin/native-image" --version
+      - name: Plugin to the local repository
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+      - name: Classpath
+        working-directory: extended/native-image/awtfree-probe
+        run: ./gradlew --no-daemon -q writeRuntimeClasspath
+      - name: Probe
+        working-directory: extended/native-image/awtfree-probe
+        run: bash ../awtfree-probe.sh
+      - name: Chains
+        if: always()
+        working-directory: extended/native-image/awtfree-probe
+        run: |
+          for f in build/probe/forbidden-*.log; do echo "=== $f"; grep -n -i -A40 "forbidden" "$f" | head -80; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-${{ matrix.os }}
+          path: extended/native-image/awtfree-probe/build/probe/*.log
+          if-no-files-found: ignore

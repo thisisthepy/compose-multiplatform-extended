@@ -47,9 +47,9 @@ jobs:
           sparse-checkout: extended/window
       - name: No runtime reflection, upcalls through the table
         run: |
-          files=$(ls extended/native-image/hello-awtfree/src/main/native-image/reachability-metadata.json 2>/dev/null || true)
-          if [ -n "$files" ]; then
-            bash extended/native-image/check-native-config.sh core-extended --strict $files
+          meta=extended/native-image/hello-awtfree/src/main/native-image/reachability-metadata.json
+          if [ -f "$meta" ]; then
+            bash extended/native-image/check-native-config.sh core-extended --strict "$meta"
           else
             echo "hello-awtfree does not exist yet: checking the window sources only"
             bash extended/native-image/check-native-config.sh core-extended

@@ -18,4 +18,6 @@ jobs:
         shell: bash
       - if: always()
         uses: actions/upload-artifact@v4
-        with: { name: log-${{ matrix.os }}-${{ strategy.job-index }}, path: probe-*.log }
+        with:
+          name: log-${{ matrix.os }}-${{ strategy.job-index }}
+          path: probe-*.log

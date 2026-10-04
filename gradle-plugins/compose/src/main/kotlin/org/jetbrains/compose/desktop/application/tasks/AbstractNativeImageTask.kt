@@ -24,6 +24,7 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
+import org.jetbrains.compose.desktop.application.internal.NativeImageNoAwt
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentArch
@@ -161,7 +162,17 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             "-Dcompose.nativeimage.staticLibraries=${linked.joinToString(",")}",
         )
         metadataDirectory.orNull?.asFile?.takeIf { it.isDirectory }?.let {
-            args += "-H:ConfigurationFileDirectories=${it.absolutePath}"
+            // An AwtFree image is built from the metadata with every AWT entry taken out of a copy,
+            // so a run of the agent on an AWT window cannot make AWT reachable.
+            val directory = if (awt) it else workDir.resolve("metadata").also { copy -> NativeImageNoAwt.cleanMetadataDirectory(it, copy) }
+            args += "-H:ConfigurationFileDirectories=${directory.absolutePath}"
+        }
+        if (!awt) {
+            args += listOf(
+                "-Dcompose.nativeimage.awtFree=true",
+                "-H:+UnlockExperimentalVMOptions",
+                "-H:ReportAnalysisForbiddenType=${NativeImageNoAwt.forbiddenTypes.joinToString(",")}",
+            )
         }
         args += link
         args += buildArgs.get()
@@ -410,7 +421,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     /** The feature and substitutions, compiled by the GraalVM doing the build. */
     private fun buildSupportJar(graalvm: File): File {
         val sources = workDir.resolve("support/src/org/jetbrains/compose/nativeimage").apply { mkdirs() }
-        for (name in listOf("LinkedLibraries", "StaticDesktopLibrariesFeature", "Substitutions")) {
+        val names = listOf("LinkedLibraries", "StaticDesktopLibrariesFeature", "Substitutions") +
+            if (windowing.get() == ApplicationWindowing.AwtFree) listOf("AwtFreeSubstitutions") else emptyList()
+        for (name in names) {
             sources.resolve("$name.java").writeText(resourceText("$name.java.txt"))
         }
         val classes = workDir.resolve("support/classes").apply { mkdirs() }

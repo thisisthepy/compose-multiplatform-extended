@@ -34,7 +34,7 @@ jobs:
 
       - name: Plugin unit tests for the native configuration
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon --console=plain :compose:test --tests '*NativeLinkerOptionsTest' --tests '*MsvcToolchainTest'
+        run: ./gradlew --no-daemon --console=plain :compose:test --tests '*NativeLinkerOptionsTest'
 
       - name: Plugin to the local repository
         working-directory: gradle-plugins

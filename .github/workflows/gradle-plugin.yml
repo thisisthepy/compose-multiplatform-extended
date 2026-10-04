@@ -7,9 +7,17 @@ on:
   push:
     branches:
       - master
+      - extended
     paths:
       - 'gradle-plugins/**'
       - '.github/workflows/gradle-plugin.yml'
+
+  workflow_dispatch:
+
+# A new push to a pull request cancels the run it supersedes. Runs on push to a branch are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-gradle-plugin:
@@ -19,9 +27,13 @@ jobs:
         # Upstream runs macOS on macos-26-xlarge, a paid larger runner this repository's
         # account cannot start: those jobs end before their first step. The standard
         # arm64 runner passes the same suite.
-        os: ['ubuntu-24.04', 'macos-26', 'windows-2022']
-        gradle: ['9.3.1', '9.5.0']
-        agp: ['9.1.1', '9.2.0']
+        #
+        # A pull request runs one cell per OS with the newest Gradle and AGP. The full
+        # matrix runs on push to extended and on workflow_dispatch: its cells take 45 to
+        # 105 minutes each and used to hold every concurrent job slot of the organisation.
+        include: ${{ fromJSON(github.event_name == 'pull_request'
+          && '[{"os":"ubuntu-24.04","gradle":"9.5.0","agp":"9.2.0"},{"os":"macos-26","gradle":"9.5.0","agp":"9.2.0"},{"os":"windows-2022","gradle":"9.5.0","agp":"9.2.0"}]'
+          || '[{"os":"ubuntu-24.04","gradle":"9.3.1","agp":"9.1.1"},{"os":"ubuntu-24.04","gradle":"9.3.1","agp":"9.2.0"},{"os":"ubuntu-24.04","gradle":"9.5.0","agp":"9.1.1"},{"os":"ubuntu-24.04","gradle":"9.5.0","agp":"9.2.0"},{"os":"macos-26","gradle":"9.3.1","agp":"9.1.1"},{"os":"macos-26","gradle":"9.3.1","agp":"9.2.0"},{"os":"macos-26","gradle":"9.5.0","agp":"9.1.1"},{"os":"macos-26","gradle":"9.5.0","agp":"9.2.0"},{"os":"windows-2022","gradle":"9.3.1","agp":"9.1.1"},{"os":"windows-2022","gradle":"9.3.1","agp":"9.2.0"},{"os":"windows-2022","gradle":"9.5.0","agp":"9.1.1"},{"os":"windows-2022","gradle":"9.5.0","agp":"9.2.0"}]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repository
@@ -38,9 +50,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          # Only save Gradle User Home state for builds on the 'master' branch.
+          # Only save Gradle User Home state for builds on the 'master' and 'extended' branches.
           # Builds on other branches will only read existing entries from the cache.
-          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+          cache-read-only: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/extended' }}
 
           # Limit the size of the cache entry.
           # These directories contain instrumented/transformed dependency jars which can be reconstructed relatively quickly.

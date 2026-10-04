@@ -1,0 +1,84 @@
+/*
+ * Copyright 2026 thisisthepy and respective authors and developers.
+ * Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE.txt file.
+ */
+
+package org.jetbrains.compose.nativeimage;
+
+import com.oracle.svm.core.annotate.Substitute;
+import com.oracle.svm.core.annotate.TargetClass;
+import java.util.function.BooleanSupplier;
+import kotlin.coroutines.CoroutineContext;
+import kotlinx.coroutines.CancellableContinuation;
+import kotlinx.coroutines.DisposableHandle;
+
+/**
+ * Cuts the places where a library Compose draws with reaches AWT by a call that never runs
+ * in an application with no AWT window. native-image follows every call it can see, so a
+ * branch that is dead at run time still makes java.awt part of the image.
+ */
+final class AwtFreeSubstitutions {
+
+    private AwtFreeSubstitutions() {
+    }
+
+    /** True when the build links no AWT, which is when these apply. */
+    static final class AwtFree implements BooleanSupplier {
+        @Override
+        public boolean getAsBoolean() {
+            return Boolean.getBoolean("compose.nativeimage.awtFree");
+        }
+    }
+}
+
+/**
+ * skiko's initialisation sets the platform look and feel through Swing when
+ * {@code skiko.rendering.laf.global} is set. The call is reached from every load of Skia and
+ * pulls in Swing's UIManager, the toolkit and the whole of Swing behind it.
+ */
+@TargetClass(className = "org.jetbrains.skiko.Actuals_awtKt", onlyWith = AwtFreeSubstitutions.AwtFree.class)
+final class Target_org_jetbrains_skiko_Actuals_awtKt {
+    @Substitute
+    public static void setSystemLookAndFeel() {
+    }
+}
+
+/**
+ * skiko's frame watcher, started by every load of Skia, launches a coroutine on its Swing
+ * dispatcher, which posts to AWT's event queue. It only measures frame times for a debug
+ * overlay that an application with no AWT window has no use for.
+ */
+@TargetClass(className = "org.jetbrains.skiko.FrameWatcher", onlyWith = AwtFreeSubstitutions.AwtFree.class)
+final class Target_org_jetbrains_skiko_FrameWatcher {
+    @Substitute
+    public void start() {
+    }
+}
+
+/**
+ * skiko's main dispatcher, which compose-ui's scenes fall back to when no dispatcher is
+ * given, runs everything on AWT's event queue through Swing. An application with no AWT
+ * window has no event queue; its UI thread belongs to the window layer, which passes its own
+ * dispatcher in. The fallback is replaced by a failure that says so.
+ */
+@TargetClass(className = "org.jetbrains.skiko.SwingDispatcher", onlyWith = AwtFreeSubstitutions.AwtFree.class)
+final class Target_org_jetbrains_skiko_SwingDispatcher {
+    @Substitute
+    public void dispatch(CoroutineContext context, Runnable block) {
+        throw new IllegalStateException(
+            "This image has no AWT event queue to run on. Give the scene a coroutine dispatcher of the window layer.");
+    }
+
+    /** The delay and timeout paths build a javax.swing.Timer. */
+    @Substitute
+    public void scheduleResumeAfterDelay(long timeMillis, CancellableContinuation<?> continuation) {
+        throw new IllegalStateException(
+            "This image has no Swing timer to delay on. Give the scene a coroutine dispatcher of the window layer.");
+    }
+
+    @Substitute
+    public DisposableHandle invokeOnTimeout(long timeMillis, Runnable block, CoroutineContext context) {
+        throw new IllegalStateException(
+            "This image has no Swing timer to time out on. Give the scene a coroutine dispatcher of the window layer.");
+    }
+}

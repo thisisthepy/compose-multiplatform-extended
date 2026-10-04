@@ -7,7 +7,11 @@ package org.jetbrains.compose.desktop.application.internal
 
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Exec
+import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
 import org.jetbrains.compose.desktop.application.tasks.AbstractNativeImageTask
+import org.jetbrains.compose.desktop.application.tasks.CheckNativeImageNoAwtTask
+import org.jetbrains.compose.internal.utils.OS
+import org.jetbrains.compose.internal.utils.currentOS
 import java.io.File
 
 /**
@@ -35,7 +39,7 @@ internal fun JvmApplicationContext.configureNativeImage() {
         })
     }
 
-    tasks.register<AbstractNativeImageTask>(taskNameAction = "package", taskNameObject = "nativeImage") {
+    val packageTask = tasks.register<AbstractNativeImageTask>(taskNameAction = "package", taskNameObject = "nativeImage") {
         description = "Builds the application as one GraalVM native image executable."
         useAppRuntimeFiles { (runtimeJars, _) -> runtimeClasspath.from(runtimeJars) }
         mainClass.set(nullableProvider { app.mainClass })
@@ -49,6 +53,21 @@ internal fun JvmApplicationContext.configureNativeImage() {
         windowsManifest.set(settings.windowsManifest)
         destinationDir.set(project.layout.buildDirectory.dir("compose/native-image/${appDirName}"))
     }
+
+    // An AwtFree image is checked once it is linked: a symbol or library name of AWT in the
+    // executable fails the build. The type check runs inside native-image itself.
+    val checkNoAwt = tasks.register<CheckNativeImageNoAwtTask>(taskNameAction = "check", taskNameObject = "nativeImageNoAwt") {
+        description = "Fails when the native image executable still refers to AWT."
+        onlyIf { app.windowing.get() == ApplicationWindowing.AwtFree }
+        executable.set(
+            packageTask.flatMap { image ->
+                image.imageName.zip(image.destinationDir) { name, dir ->
+                    dir.file(if (currentOS == OS.Windows) "$name.exe" else name)
+                }
+            }
+        )
+    }
+    packageTask.configure { it.finalizedBy(checkNoAwt) }
 
     // The application run on GraalVM's JVM with the tracing agent, writing the reachability
     // metadata the image is built from. The agent writes on a clean exit, so the application

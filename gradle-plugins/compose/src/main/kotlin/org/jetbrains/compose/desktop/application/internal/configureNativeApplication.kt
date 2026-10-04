@@ -108,6 +108,11 @@ private fun configureNativeBinary(app: NativeApplication, binary: NativeBinary) 
             extra = settings.linkerOpts.get()
         ).toTypedArray()
     )
+    if (binary.target.konanTarget.family == Family.MINGW) {
+        // Every mingwX64 target ends as an MSVC executable, so the build stops before
+        // linking when the toolset is missing, instead of failing on a bare symbol.
+        binary.linkTaskProvider.configure { it.doFirst { locateMsvc(RealMsvcHost) } }
+    }
     if (binary is Executable && settings.entryPoint.isPresent) {
         binary.entryPoint = settings.entryPoint.get()
     }

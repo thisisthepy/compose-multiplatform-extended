@@ -6,6 +6,7 @@
 package org.jetbrains.compose.desktop.application.dsl
 
 import org.gradle.api.Action
+import org.gradle.api.provider.Property
 import org.gradle.api.Task
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.tasks.SourceSet
@@ -30,6 +31,14 @@ abstract class JvmApplication {
     abstract fun nativeDistributions(fn: Action<JvmApplicationDistributions>)
     abstract val buildTypes: JvmApplicationBuildTypes
     abstract fun buildTypes(fn: Action<JvmApplicationBuildTypes>)
+    /** What `packageApplication` makes. Defaults to [ApplicationOutput.Jvm]. */
+    abstract val output: Property<ApplicationOutput>
+
+    /**
+     * How the window is made. Defaults to [ApplicationWindowing.Awt] for [ApplicationOutput.Jvm]
+     * and [ApplicationWindowing.AwtFree] for the other outputs.
+     */
+    abstract val windowing: Property<ApplicationWindowing>
     abstract val nativeImage: NativeImageSettings
     abstract fun nativeImage(fn: Action<NativeImageSettings>)
 }

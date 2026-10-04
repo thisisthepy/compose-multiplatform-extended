@@ -2,7 +2,25 @@
 
 The Gradle plugin packages a Kotlin/Native desktop executable the way it packages a JVM
 application: from the metadata in `nativeDistributions` (name, version, vendor, icons,
-resources). The code lives here, `extended/gradle-plugin-kn/`, and is compiled into the plugin
+resources), with upstream's own `TargetFormat` names. What a window (Compose) app makes:
+
+| OS | App | Package (`targetFormats`) | Store package |
+| --- | --- | --- | --- |
+| macOS | `.app` | `Dmg` | `Pkg` |
+| Linux | `.AppImage` | `Deb`, `Rpm` | Flatpak (not yet, see below) |
+| Windows | `.exe` | `Msi` (under decision), installer `.exe` (Velopack, not yet) | `.msix` (not yet) |
+
+A command line program (`appKind = Cli`) is not packaged: it makes the bare executable, `.kexe`
+on macOS and Linux and `.exe` on Windows, signed on macOS. The upstream JVM packaging is
+untouched.
+
+`.dmg` and the Linux and Windows installers install unsigned, and are the default way to
+distribute. `.pkg` and `.msix` are store formats: they are documented for store submission
+(re-signing by the store) or for when a certificate exists. A real `.AppImage` file beyond
+what `packageAppImageNative` makes, Flatpak, MSIX and the Velopack installer are being built
+separately. The `.msi` (WiX) is on hold while the owner decides.
+
+The code lives here, `extended/gradle-plugin-kn/`, and is compiled into the plugin
 (`gradle-plugins/compose/build.gradle.kts` adds this directory as a source root). The upstream
 edits are small hooks: `configureNativeApplication`, the native distribution settings, and the
 Info.plist generation of the app-dir task.
@@ -13,27 +31,31 @@ Names end in the build type and the target, for example `...ReleaseMacosArm64`.
 
 | Task | OS | Result |
 | --- | --- | --- |
-| `createDistributableNative...` | all | the runnable layout: `.app`, `.AppDir` or the exe folder |
-| `signDistributableNative...` | macOS | signs the `.app` (Developer ID, or ad hoc without an identity) |
-| `packageDmgNative...` | macOS | `.dmg` (when `TargetFormat.Dmg` is listed) |
+| `createDistributableNative...` | window app | the runnable layout: `.app`, `.AppDir` or the exe folder |
+| `signDistributableNative...` | macOS | signs the `.app` (Developer ID, or ad hoc without an identity, with Gatekeeper instructions beside it) |
+| `packageDmgNative...` | macOS | `.dmg` (when `Dmg` is listed), with `checksums.sha256` |
+| `packagePkgNative...` | macOS | `.pkg` through `productbuild` (when `Pkg` is listed), signed with the installer certificate of the same identity; `macOS { appStore = true }` for the Mac App Store |
 | `notarizeDmgNative...` | macOS | notarizes and staples the dmg; skips with a message when credentials are absent |
 | `lipoNative<Build>` | macOS | one universal executable, when `macOS { universalBinary = true }` and both targets exist |
 | `packageAppImageNative...` | Linux | `.AppImage` through `appimagetool` |
-| `packageDebNative...` | Linux | `.deb` through `dpkg-deb` (when `TargetFormat.Deb` is listed) |
-| `packageExeNative...` | Windows | the application folder as a `.zip` (when `TargetFormat.Exe` is listed) |
-| `packageMsiNative...` | Windows | `.msi` through WiX 3 (when `TargetFormat.Msi` is listed) |
+| `packageDebNative...` | Linux | `.deb` through `dpkg-deb` (when `Deb` is listed) |
+| `packageRpmNative...` | Linux | `.rpm` through `rpmbuild` (when `Rpm` is listed) |
+| `packageExeNative...`, `packageMsiNative...` | Windows | the folder as a `.zip`, and an `.msi` through WiX 3 (as of the first version; both are being reworked) |
+| `createExecutableNative...` | command line | `<name>.kexe`, or `<name>.exe` on Windows |
+| `signExecutableNative...` | command line, macOS | keeps the linker's ad hoc signature while it verifies and signs ad hoc again when it does not; signs with the Developer ID identity when one is configured |
+| `notarizeExecutableNative...` | command line, macOS | optional: submits a zip of the `.kexe` (a bare file cannot be stapled); skips without credentials |
 | `runNative...` | host | runs the linked executable |
-| `runDistributableNative...` | host | runs the executable inside the packaged layout |
-| `packageKotlinNative` | host | every package task of the host OS |
+| `runDistributableNative...` | host | runs the executable inside the packaged layout, or the `.kexe` |
+| `packageKotlinNative` | host | every output task of the host OS |
 
 Targets of every desktop family are declared with `compose.nativeApplication.desktopTargets(...)`.
-Only the binaries of the host OS get packaging tasks, because the tools are the host's own.
+Only the binaries of the host OS get tasks, because the tools are the host's own.
 
 ## Prerequisites
 
 ### macOS
 
-- Xcode command line tools (`codesign`, `lipo`, `hdiutil`, `xcrun`).
+- Xcode command line tools (`codesign`, `lipo`, `hdiutil`, `productbuild`, `xcrun`).
 - Signing: a Developer ID Application certificate in a keychain, named by
   `nativeDistributions.macOS.signing { identity = ... }`. Without an identity the app is
   signed ad hoc, which runs locally and on Apple Silicon but cannot be distributed.
@@ -46,7 +68,7 @@ Only the binaries of the host OS get packaging tasks, because the tools are the 
 
 - `appimagetool` on `PATH`, for the AppImage (needs FUSE, or runs with
   `--appimage-extract-and-run`, which the task passes).
-- `dpkg-deb` (package `dpkg`), for the deb.
+- `dpkg-deb` (package `dpkg`), for the deb, and `rpmbuild` (package `rpm-build`), for the rpm.
 - To link and run a window: the X11 development libraries (`libx11-dev libxext-dev libxi-dev
   libxrandr-dev libxcursor-dev libxcb1-dev`); the deb depends on their runtime packages.
 
@@ -75,8 +97,8 @@ beside the exe as `<name>.exe.manifest`, which Windows ignores when one is embed
 - macOS: `Contents/MacOS/<name>`, `Contents/Info.plist` (with `infoPlist { extraKeysRawXml }`
   and `fileAssociation`), the `.icns` icon, `Contents/Resources/compose-resources`.
 - Linux: the executable and `compose-resources` side by side (`usr/bin` in the AppDir,
-  `/opt/<name>` in the deb with a `/usr/bin` symlink), a `.desktop` entry and a PNG icon.
+  `/opt/<name>` in the deb and rpm with a `/usr/bin` symlink), a `.desktop` entry and a PNG icon.
 - Windows: `<name>.exe`, `compose-resources`, the `.ico` and the manifest.
 
-rpm is not produced: it needs `rpmbuild` and a spec template of the same size as the deb's,
-and nothing uses it yet.
+Every package records its SHA-256 in `checksums.sha256` beside it. Command line programs make
+the single executable.

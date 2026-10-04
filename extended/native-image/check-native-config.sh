@@ -28,7 +28,9 @@ note() { echo "FAIL: $*" >&2; fail=1; }
 window="$core/extended/window"
 [[ -d "$window" ]] || { echo "no $window" >&2; exit 2; }
 
-mapfile -t sources < <(find "$window" -type f \( -name '*.kt' -o -name '*.java' \) \
+# Read line by line: macOS ships bash 3.2, which has no mapfile.
+sources=()
+while IFS= read -r line; do sources+=("$line"); done < <(find "$window" -type f \( -name '*.kt' -o -name '*.java' \) \
     -not -path '*/test/*' -not -path '*/build/*' | sort)
 echo "window sources checked: ${#sources[@]}"
 [[ ${#sources[@]} -gt 0 ]] || { echo "no window sources found" >&2; exit 2; }
@@ -51,7 +53,8 @@ echo "files with upcall entry points: $entry_files"
 # Kotlin/Native window modules: C and Objective-C reach Kotlin through staticCFunction or
 # @CName entries, and nothing is looked up by name at run time. K/N has no JVM reflection, so
 # what is left to forbid is kotlin.reflect.full, ServiceLoader and Objective-C class lookups by name. A selector for a target-action menu item is not one: it names a method of an object the code itself created.
-mapfile -t kn_sources < <(find "$window/native" -type f -name '*.kt' \
+kn_sources=()
+while IFS= read -r line; do kn_sources+=("$line"); done < <(find "$window/native" -type f -name '*.kt' \
     -not -path '*/test/*' -not -path '*/build/*' 2>/dev/null | sort)
 echo "Kotlin/Native window sources checked: ${#kn_sources[@]}"
 if [[ ${#kn_sources[@]} -gt 0 ]]; then

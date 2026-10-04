@@ -1,19 +1,8 @@
 # Kotlin/Native desktop packaging
 
-What a Kotlin/Native desktop application produces depends on whether it has a window:
-
-| App | App | Package |
-| --- | --- | --- |
-| macOS, with a window (Compose) | `.app` | `.dmg` |
-| Linux, with a window (Compose) | `.AppImage` | Flatpak (`.flatpak`) |
-| Windows, with a window (Compose) | `.exe` | `.msix` |
-| Command line (`appKind = Cli`) | `.kexe` (macOS, Linux), `.exe` (Windows) | none |
-
-A command line program is not packaged: the executable is the output. On macOS the `.kexe`
-is signed. `.msi` and `.deb` are not made for Kotlin/Native applications. The upstream JVM
-packaging (`nativeDistributions` with `Msi`, `Deb` and so on) is untouched.
-
-The code lives here, `extended/gradle-plugin-kn/`, and is compiled into the plugin
+The Gradle plugin packages a Kotlin/Native desktop executable the way it packages a JVM
+application: from the metadata in `nativeDistributions` (name, version, vendor, icons,
+resources). The code lives here, `extended/gradle-plugin-kn/`, and is compiled into the plugin
 (`gradle-plugins/compose/build.gradle.kts` adds this directory as a source root). The upstream
 edits are small hooks: `configureNativeApplication`, the native distribution settings, and the
 Info.plist generation of the app-dir task.
@@ -24,41 +13,21 @@ Names end in the build type and the target, for example `...ReleaseMacosArm64`.
 
 | Task | OS | Result |
 | --- | --- | --- |
-| `createDistributableNative...` | window app | the runnable layout: `.app`, `.AppDir` or the exe folder (with a recorded checksum) |
-| `signDistributableNative...` | macOS | signs the `.app` (Developer ID, or ad hoc without an identity, with Gatekeeper instructions beside it) |
-| `packageDmgNative...` | macOS | `.dmg` (when `TargetFormat.Dmg` is listed), with `checksums.sha256` |
+| `createDistributableNative...` | all | the runnable layout: `.app`, `.AppDir` or the exe folder |
+| `signDistributableNative...` | macOS | signs the `.app` (Developer ID, or ad hoc without an identity) |
+| `packageDmgNative...` | macOS | `.dmg` (when `TargetFormat.Dmg` is listed) |
 | `notarizeDmgNative...` | macOS | notarizes and staples the dmg; skips with a message when credentials are absent |
 | `lipoNative<Build>` | macOS | one universal executable, when `macOS { universalBinary = true }` and both targets exist |
-| `packageAppImageNative...` | Linux | `.AppImage` through `appimagetool`, with `.zsync` when update information is set |
-| `packageFlatpakNative...` | Linux | `.flatpak` bundle, with the manifest and metainfo beside it |
-| `packageMsixNative...` | Windows | `.msix` and `.msixbundle` through MakeAppx; unsigned with `INSTALL.txt`, or signed with a certificate |
-| `wackMsixNative...` | Windows | runs the Windows App Certification Kit on the package |
-| `createExecutableNative...` | command line | `<name>.kexe`, or `<name>.exe` on Windows |
-| `signExecutableNative...` | command line, macOS | keeps the linker's ad hoc signature while it verifies and signs ad hoc again when it does not; signs with the Developer ID identity when one is configured |
-| `notarizeExecutableNative...` | command line, macOS | optional: submits a zip of the `.kexe` (a bare file cannot be stapled); skips without credentials |
+| `packageAppImageNative...` | Linux | `.AppImage` through `appimagetool` |
+| `packageDebNative...` | Linux | `.deb` through `dpkg-deb` (when `TargetFormat.Deb` is listed) |
+| `packageExeNative...` | Windows | the application folder as a `.zip` (when `TargetFormat.Exe` is listed) |
+| `packageMsiNative...` | Windows | `.msi` through WiX 3 (when `TargetFormat.Msi` is listed) |
 | `runNative...` | host | runs the linked executable |
-| `runDistributableNative...` | host | runs the executable inside the packaged layout, or the `.kexe` |
-| `packageKotlinNative` | host | every output task of the host OS |
+| `runDistributableNative...` | host | runs the executable inside the packaged layout |
+| `packageKotlinNative` | host | every package task of the host OS |
 
 Targets of every desktop family are declared with `compose.nativeApplication.desktopTargets(...)`.
-Only the binaries of the host OS get tasks, because the tools are the host's own.
-
-## Settings
-
-```kotlin
-nativeDistributions {
-    packageName = "Ember"
-    packageVersion = "1.2.3"          // the msix version is 1.2.3.0 (Store) or 1.2.3.<revision>
-    macOS { bundleID = "org.example.ember"; signing { identity = "..." } }
-    msix {
-        identityName = "Example.Ember"; publisher = "CN=Example"   // the Store's values for a reserved name
-        channel = MsixChannel.Sideload                              // or Store (revision stays 0)
-        certificateFile = "cert.pfx"; certificatePassword = "..."   // omit to leave it unsigned
-    }
-    flatpak { runtimeVersion = "24.08"; wayland = false; finishArgs = listOf("--share=network") }
-    appImage { updateInformation = "gh-releases-zsync|owner|repo|latest|Ember-*-x86_64.AppImage.zsync" }
-}
-```
+Only the binaries of the host OS get packaging tasks, because the tools are the host's own.
 
 ## Prerequisites
 
@@ -77,10 +46,9 @@ nativeDistributions {
 
 - `appimagetool` on `PATH`, for the AppImage (needs FUSE, or runs with
   `--appimage-extract-and-run`, which the task passes).
-- `flatpak` and `flatpak-builder`, with the `org.freedesktop.Platform` and `Sdk` runtime of the
-  version in `flatpak { runtimeVersion }`, for the Flatpak.
+- `dpkg-deb` (package `dpkg`), for the deb.
 - To link and run a window: the X11 development libraries (`libx11-dev libxext-dev libxi-dev
-  libxrandr-dev libxcursor-dev libxcb1-dev`).
+  libxrandr-dev libxcursor-dev libxcb1-dev`); the deb depends on their runtime packages.
 
 ### Windows
 
@@ -96,29 +64,19 @@ So the build needs:
 - Visual Studio Build Tools with the MSVC toolset v14.51 or later, `clang-cl`, and the
   Windows SDK. The plugin finds them with `vswhere` at build start and stops with an
   install message when one is missing.
-- The Windows SDK's `makeappx.exe` and `signtool.exe` for the msix (set
-  `COMPOSE_WINDOWS_SDK_BIN` to their directory if they are not in `Windows Kits`), and its
-  App Certification Kit for `wackMsixNative...`.
+- WiX Toolset 3 for the msi: set `WIX_PATH` to its binaries directory.
 
 Windows applications declare per-monitor DPI awareness. The manifest is the same text the
 GraalVM native image uses (`WindowsAppManifest`), embedded at link time and also written
 beside the exe as `<name>.exe.manifest`, which Windows ignores when one is embedded.
 
-## What the outputs contain
+## What the packages contain
 
-- macOS `.app`: `Contents/MacOS/<name>`, `Contents/Info.plist` (with
-  `infoPlist { extraKeysRawXml }` and `fileAssociation`), the `.icns` icon,
-  `Contents/Resources/compose-resources`. The `.dmg` carries a note on opening an ad hoc
-  signed app that Gatekeeper blocks.
-- Linux `.AppImage`: the executable and `compose-resources` side by side in `usr/bin`, a
-  `.desktop` entry, AppStream metainfo and a PNG icon.
-- Linux Flatpak: the same payload under `/app/lib/<name>`, a launcher in `/app/bin`, an X11
-  sandbox (shared IPC, GPU), and the manifest in the JSON form `flatpak-builder` reads.
-- Windows `.exe` folder: `<name>.exe`, `compose-resources`, the `.ico` and the manifest.
-- Windows `.msix`: the same folder plus `AppxManifest.xml` (a full trust desktop application)
-  and the tile images drawn from one PNG icon.
-- Every package records its SHA-256 in `checksums.sha256` beside it.
-- Command line: the single executable.
+- macOS: `Contents/MacOS/<name>`, `Contents/Info.plist` (with `infoPlist { extraKeysRawXml }`
+  and `fileAssociation`), the `.icns` icon, `Contents/Resources/compose-resources`.
+- Linux: the executable and `compose-resources` side by side (`usr/bin` in the AppDir,
+  `/opt/<name>` in the deb with a `/usr/bin` symlink), a `.desktop` entry and a PNG icon.
+- Windows: `<name>.exe`, `compose-resources`, the `.ico` and the manifest.
 
-The update channels (Sparkle appcast, zsync hosting and a Flatpak repository, the Microsoft
-Store and an App Installer feed) are tracked in issues #34, #35 and #36.
+rpm is not produced: it needs `rpmbuild` and a spec template of the same size as the deb's,
+and nothing uses it yet.

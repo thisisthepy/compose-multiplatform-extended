@@ -96,28 +96,49 @@ class NativePackageFilesTest {
     }
 
     @Test
-    fun cliExecutablesAreKexeOnMacAndLinuxAndExeOnWindows() {
-        assertEquals("tool.kexe", NativeCliOutput.fileName("tool", windows = false))
-        assertEquals("tool.exe", NativeCliOutput.fileName("tool", windows = true))
-    }
-
-    @Test
-    fun aDeveloperIdIdentityAlwaysSignsTheKexe() {
-        for (valid in listOf(true, false)) {
-            assertEquals(NativeCliOutput.MacSigning.DeveloperId, NativeCliOutput.macSigning(true, valid))
+    fun debControlHasTheMandatoryFields() {
+        val control = DebControl.render(
+            packageName = "Hello App",
+            version = "1.2.3",
+            architecture = "amd64",
+            maintainer = "Jo <jo@example.org>",
+            description = "A greeting.\nMore detail.",
+            installedSizeKb = 1234,
+            depends = listOf("libc6", "libx11-6"),
+        )
+        val lines = control.lines()
+        for (line in listOf(
+            "Package: hello-app", "Version: 1.2.3", "Architecture: amd64", "Maintainer: Jo <jo@example.org>",
+            "Installed-Size: 1234", "Depends: libc6, libx11-6", "Description: A greeting.", " More detail.",
+        )) {
+            assertTrue(line in lines, control)
         }
+        assertTrue(control.endsWith("\n"), "a control file ends with a newline")
     }
 
     @Test
-    fun theLinkerSignatureIsKeptWhileItVerifiesAndReSignedWhenItDoesNot() {
-        assertEquals(NativeCliOutput.MacSigning.KeepLinkerSignature, NativeCliOutput.macSigning(false, true))
-        assertEquals(NativeCliOutput.MacSigning.ReSignAdHoc, NativeCliOutput.macSigning(false, false))
+    fun debArchitectureFollowsTheTarget() {
+        assertEquals("arm64", DebControl.architecture("linuxArm64"))
+        assertEquals("amd64", DebControl.architecture("linuxX64"))
     }
 
     @Test
-    fun appImageArchitectureFollowsTheTarget() {
-        assertEquals("arm64", NativeCliOutput.architecture("linuxArm64"))
-        assertEquals("amd64", NativeCliOutput.architecture("linuxX64"))
+    fun msiSourceIsWellFormedAndListsEveryFile() {
+        val wxs = WindowsInstallerSource.render(
+            productName = "Hello & Co",
+            version = "1.2.3",
+            manufacturer = "Example",
+            exeName = "Hello.exe",
+            upgradeCode = WindowsInstallerSource.guid("Hello"),
+            perUser = false,
+            shortcut = true,
+            files = listOf("Hello.exe", "compose-resources/a.png"),
+        )
+        DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(wxs.byteInputStream())
+        assertTrue("Hello &amp; Co" in wxs, wxs)
+        assertTrue("""Source="SourceDir\compose-resources\a.png"""" in wxs, wxs)
+        assertTrue("<Shortcut" in wxs, wxs)
+        assertEquals(WindowsInstallerSource.guid("Hello"), WindowsInstallerSource.guid("Hello"))
     }
 
     @Test
@@ -141,5 +162,76 @@ class NativePackageFilesTest {
         } finally {
             work.deleteRecursively()
         }
+    }
+
+    @Test
+    fun cliExecutablesAreKexeOnMacAndLinuxAndExeOnWindows() {
+        assertEquals("tool.kexe", NativeCliOutput.fileName("tool", windows = false))
+        assertEquals("tool.exe", NativeCliOutput.fileName("tool", windows = true))
+    }
+
+    @Test
+    fun aDeveloperIdIdentityAlwaysSignsTheKexe() {
+        for (valid in listOf(true, false)) {
+            assertEquals(NativeCliOutput.MacSigning.DeveloperId, NativeCliOutput.macSigning(true, valid))
+        }
+    }
+
+    @Test
+    fun theLinkerSignatureIsKeptWhileItVerifiesAndReSignedWhenItDoesNot() {
+        assertEquals(NativeCliOutput.MacSigning.KeepLinkerSignature, NativeCliOutput.macSigning(false, true))
+        assertEquals(NativeCliOutput.MacSigning.ReSignAdHoc, NativeCliOutput.macSigning(false, false))
+    }
+
+    @Test
+    fun pkgIsSignedWithTheInstallerCertificateOfTheSameIdentity() {
+        assertEquals(
+            "Developer ID Installer: Example Inc (ABCDE12345)",
+            PkgSigning.installerIdentity("Developer ID Application: Example Inc (ABCDE12345)", appStore = false)
+        )
+        assertEquals(
+            "3rd Party Mac Developer Installer: Example Inc",
+            PkgSigning.installerIdentity("Example Inc", appStore = true)
+        )
+        assertEquals(
+            "3rd Party Mac Developer Installer: Example Inc",
+            PkgSigning.installerIdentity("3rd Party Mac Developer Application: Example Inc", appStore = true)
+        )
+    }
+
+    @Test
+    fun rpmSpecCollectsTheStagedFiles() {
+        val spec = RpmSpec.render(
+            name = "Hello App", version = "1.2.3-beta", release = "2", summary = "A greeting.", license = "MIT",
+            description = "A greeting.\nMore.", vendor = "Example", architecture = "x86_64",
+            stageDir = "/work/rpm-root", files = listOf("/opt/hello-app", "/usr/bin/hello-app"),
+        )
+        val lines = spec.lines()
+        for (line in listOf(
+            "Name: hello-app", "Version: 1.2.3_beta", "Release: 2", "Summary: A greeting.", "License: MIT",
+            "Vendor: Example", "BuildArch: x86_64", "AutoReqProv: no", "%files", "/opt/hello-app", "/usr/bin/hello-app",
+        )) assertTrue(line in lines, spec)
+        assertTrue("cp -a \"/work/rpm-root\"/. %{buildroot}/" in lines, spec)
+        assertEquals("aarch64", RpmSpec.architecture("linuxArm64"))
+        assertEquals("x86_64", RpmSpec.architecture("linuxX64"))
+    }
+
+    @Test
+    fun checksumsAreRecordedInSha256sumFormat() {
+        val dir = File.createTempFile("sums", "").apply { delete(); mkdirs() }
+        try {
+            dir.resolve("a.bin").writeText("abc")
+            val out = NativeChecksums.write(dir, listOf(dir.resolve("a.bin"), dir.resolve("missing")))
+            assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.bin\n", out.readText())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun theGatekeeperNoteSaysHowToOpenABlockedApp() {
+        val notes = InstallNotes.macGatekeeper("Ember")
+        assertTrue("Open Anyway" in notes)
+        assertTrue("xattr -dr com.apple.quarantine \"/Applications/Ember.app\"" in notes, notes)
     }
 }

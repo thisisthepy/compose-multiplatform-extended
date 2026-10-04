@@ -10,7 +10,7 @@ import org.jetbrains.compose.desktop.application.extended.NativeAppKind
 import java.util.*
 
 abstract class NativeApplicationDistributions : AbstractDistributions() {
-    private val supportedFormats = EnumSet.of(TargetFormat.Dmg)
+    private val supportedFormats = EnumSet.of(TargetFormat.Dmg, TargetFormat.Pkg, TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Msi, TargetFormat.Exe)
 
     override fun targetFormats(vararg formats: TargetFormat) {
         val unsupportedFormats = formats.filter { it !in supportedFormats }
@@ -25,8 +25,9 @@ abstract class NativeApplicationDistributions : AbstractDistributions() {
     }
 
     /**
-     * [NativeAppKind.Gui] (the default) makes an application: `.app`, `.AppImage` or an exe folder.
-     * [NativeAppKind.Cli] makes the bare executable (`.kexe`, or `.exe` on Windows) and no package.
+     * [NativeAppKind.Gui] (the default) makes an application and the packages named in
+     * `targetFormats`. [NativeAppKind.Cli] makes the bare executable (`.kexe`, or `.exe` on
+     * Windows) and no package.
      */
     var appKind: NativeAppKind = NativeAppKind.Gui
 

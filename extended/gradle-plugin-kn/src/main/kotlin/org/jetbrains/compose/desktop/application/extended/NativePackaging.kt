@@ -11,6 +11,7 @@ import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
 import org.jetbrains.compose.desktop.application.dsl.NativeApplication
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.compose.desktop.application.tasks.AbstractNativeMacApplicationPackageAppDirTask
 import org.jetbrains.compose.desktop.application.tasks.AbstractNativeMacApplicationPackageDmgTask
 import org.jetbrains.compose.desktop.tasks.AbstractUnpackDefaultComposeApplicationResourcesTask
@@ -192,6 +193,7 @@ internal object MacNativePackager : NativeOsPackager {
             packageName.set(create.flatMap { it.packageName })
             bundleID.set(create.flatMap { it.bundleID })
             signingSettings = settings.signing
+            appStore.set(ctx.project.provider { settings.appStore })
             entitlements.set(ctx.project.provider { settings.entitlementsFile.orNull?.asFile?.absolutePath })
         }
 
@@ -199,7 +201,13 @@ internal object MacNativePackager : NativeOsPackager {
         val dmgName = ctx.taskName("packageDmgNative")
         if (ctx.project.tasks.names.contains(dmgName)) {
             val dmg = ctx.project.tasks.named(dmgName, AbstractNativeMacApplicationPackageDmgTask::class.java)
-            dmg.configure { it.dependsOn(sign) }
+            dmg.configure { task ->
+                task.dependsOn(sign)
+                task.doLast {
+                    val dir = task.destinationDir.get().asFile
+                    NativeChecksums.write(dir, dir.listFiles().orEmpty().filter { it.name.endsWith(".dmg") })
+                }
+            }
             val notarize = ctx.register<AbstractNativeMacNotarizeTask>("notarizeDmgNative") {
                 dependsOn(dmg)
                 packageFiles.from(dmg.flatMap { it.destinationDir }.map { dir ->
@@ -210,6 +218,19 @@ internal object MacNativePackager : NativeOsPackager {
             packages += notarize
         } else {
             packages += sign
+        }
+        if (TargetFormat.Pkg in ctx.distributions.targetFormats) {
+            packages += ctx.register<AbstractNativeMacApplicationPackagePkgTask>("packagePkgNative") {
+                dependsOn(sign)
+                packageName.set(create.flatMap { it.packageName })
+                packageVersion.set(create.flatMap { it.packageVersion })
+                appDir.set(create.flatMap { it.destinationDir })
+                bundleID.set(create.flatMap { it.bundleID })
+                installDir.set(ctx.project.provider { settings.installationPath ?: "/Applications" })
+                appStore.set(ctx.project.provider { settings.appStore })
+                signingSettings = settings.signing
+                destinationDir.set(ctx.outputDir("pkg"))
+            }
         }
 
         registerNativeRunTasks(ctx, create.flatMap { it.destinationDir }.zip(create.flatMap { it.packageName }) { dir, name ->
@@ -255,7 +276,7 @@ internal object LinuxNativePackager : NativeOsPackager {
         val settings = ctx.distributions.linux
         fun AbstractNativeLinuxPackageTask.common() {
             packageName.set(ctx.packageName(settings.packageName))
-            packageVersion.set(ctx.packageVersion(settings.packageVersion))
+            packageVersion.set(ctx.packageVersion(settings.debPackageVersion ?: settings.packageVersion))
             executable.set(ctx.executable)
             val default = ctx.unpackDefaultResources.flatMap { it.resources.linuxIcon }
             iconFile.set(settings.iconFile.orElse(default))
@@ -264,7 +285,8 @@ internal object LinuxNativePackager : NativeOsPackager {
             appDescription.set(ctx.project.provider { ctx.distributions.description })
             appCategory.set(ctx.project.provider { settings.appCategory ?: settings.menuGroup })
             vendor.set(ctx.project.provider { ctx.distributions.vendor })
-            architecture.set(NativeCliOutput.architecture(ctx.binary.target.name))
+            maintainer.set(ctx.project.provider { settings.debMaintainer })
+            architecture.set(DebControl.architecture(ctx.binary.target.name))
             fileAssociationMimeTypes.set(ctx.project.provider { settings.fileAssociations.map { it.mimeType } })
             composeResourcesDirs.setFrom(ctx.composeResources)
         }
@@ -279,7 +301,22 @@ internal object LinuxNativePackager : NativeOsPackager {
             this.appDir.set(appDir.flatMap { it.destinationDir })
             destinationDir.set(ctx.outputDir("appimage"))
         }
-        val packages = listOf<TaskProvider<*>>(appImage)
+        val packages = mutableListOf<TaskProvider<*>>(appImage)
+        if (TargetFormat.Deb in ctx.distributions.targetFormats) {
+            packages += ctx.register<AbstractNativeLinuxDebTask>("packageDebNative") {
+                common()
+                destinationDir.set(ctx.outputDir("deb"))
+            }
+        }
+        if (TargetFormat.Rpm in ctx.distributions.targetFormats) {
+            packages += ctx.register<AbstractNativeLinuxRpmTask>("packageRpmNative") {
+                common()
+                rpmLicense.set(ctx.project.provider { settings.rpmLicenseType })
+                release.set(ctx.project.provider { settings.appRelease ?: "1" })
+                packageVersion.set(ctx.packageVersion(settings.rpmPackageVersion ?: settings.packageVersion))
+                destinationDir.set(ctx.outputDir("rpm"))
+            }
+        }
         registerNativeRunTasks(ctx, appDir.flatMap { it.destinationDir }.zip(appDir.flatMap { it.packageName }) { dir, name ->
             dir.asFile.resolve("$name.AppDir/usr/bin/$name")
         })
@@ -307,7 +344,30 @@ internal object WindowsNativePackager : NativeOsPackager {
             composeResourcesDirs.setFrom(ctx.composeResources)
             destinationDir.set(ctx.outputDir("app-image"))
         }
-        val packages = listOf<TaskProvider<*>>(appDir)
+        val packages = mutableListOf<TaskProvider<*>>()
+        if (TargetFormat.Exe in ctx.distributions.targetFormats) {
+            packages += ctx.register<AbstractNativeWindowsZipTask>("packageExeNative") {
+                dependsOn(appDir)
+                packageName.set(appDir.flatMap { it.packageName })
+                packageVersion.set(ctx.packageVersion(settings.exePackageVersion ?: settings.packageVersion))
+                this.appDir.set(appDir.flatMap { it.destinationDir })
+                destinationDir.set(ctx.outputDir("exe"))
+            }
+        }
+        if (TargetFormat.Msi in ctx.distributions.targetFormats) {
+            packages += ctx.register<AbstractNativeWindowsMsiTask>("packageMsiNative") {
+                dependsOn(appDir)
+                packageName.set(appDir.flatMap { it.packageName })
+                packageVersion.set(ctx.packageVersion(settings.msiPackageVersion ?: settings.packageVersion))
+                this.appDir.set(appDir.flatMap { it.destinationDir })
+                vendor.set(ctx.project.provider { ctx.distributions.vendor })
+                upgradeUuid.set(ctx.project.provider { settings.upgradeUuid })
+                perUserInstall.set(settings.perUserInstall)
+                shortcut.set(settings.shortcut)
+                destinationDir.set(ctx.outputDir("msi"))
+            }
+        }
+        if (packages.isEmpty()) packages += appDir
         registerNativeRunTasks(ctx, appDir.flatMap { it.destinationDir }.zip(appDir.flatMap { it.packageName }) { dir, name ->
             dir.asFile.resolve("$name/$name.exe")
         })

@@ -165,6 +165,16 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             args += "-H:ConfigurationFileDirectories=${it.absolutePath}"
         }
         args += link
+        if (!awt) {
+            // A CEntryPointLiteral is resolved while the image is built, so the classes that
+            // hold the upcall tables have to be initialized then.
+            val upcalls = when (platform) {
+                Platform.MacosArm64 -> listOf("AppKitUpcalls", "AppKitUpcallSlots").map { "org.thisisthepy.compose.window.graalvm.macos.$it" }
+                Platform.LinuxX64 -> listOf("org.thisisthepy.compose.window.graalvm.linux.X11Upcalls")
+                Platform.WindowsX64 -> emptyList()
+            }
+            if (upcalls.isNotEmpty()) args += "--initialize-at-build-time=${upcalls.joinToString(",")}"
+        }
         args += buildArgs.get()
         args += listOf("-o", output.resolve(imageName.get()).absolutePath, mainClass.get())
 
@@ -173,6 +183,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         // allows a command line through native-image's .cmd launcher.
         val argFile = workDir.resolve("native-image.args")
         argFile.writeText(args.drop(1).joinToString("\n") { quoteArgument(it) })
+        logger.info("native-image arguments:\n" + args.drop(1).joinToString("\n"))
         run(listOf(args.first(), "@${argFile.absolutePath}"), workDir.resolve("native-image.log"))
         if (platform == Platform.LinuxX64) removeUnneededLinuxLibraries(output)
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")
@@ -204,6 +215,8 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             for (framework in listOf("AppKit", "Carbon", "QuartzCore")) {
                 linker("-framework", framework)
             }
+            // Skia and skiko's bindings are C++; with AWT the JDK's archives bring the library in.
+            linker("-lc++")
         }
         for (library in if (awt) listOf("awt_lwawt", "osxui", "skiko") else listOf("skiko")) {
             linker("-Wl,-exported_symbol,_JNI_OnLoad_$library")

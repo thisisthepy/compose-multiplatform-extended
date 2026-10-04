@@ -15,6 +15,7 @@ import org.gradle.api.artifacts.dsl.RepositoryHandler
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository
 import org.gradle.api.plugins.ExtensionAware
 import org.jetbrains.compose.desktop.DesktopExtension
+import org.jetbrains.compose.desktop.application.extended.msvc.configureKotlinMsvc
 import org.jetbrains.compose.desktop.application.internal.configureDesktop
 import org.jetbrains.compose.desktop.preview.internal.initializePreview
 import org.jetbrains.compose.experimental.internal.configureExperimentalTargetsFlagsCheck
@@ -49,6 +50,8 @@ abstract class ComposePlugin : Plugin<Project> {
         composeExtension.extensions.create("web", WebExtension::class.java)
 
         project.checkComposeCompilerPlugin()
+        // Fork-only: the Windows MSVC link for Kotlin/Native, which needs no Compose.
+        project.configureKotlinMsvc()
 
         project.configureComposeResources(resourcesExtension)
 

@@ -48,10 +48,16 @@ private fun Project.checkComposeCompilerPlugin(kgp: KotlinBasePlugin) {
         //There is no other way to check that the plugin WASN'T applied!
         afterEvaluate {
             logger.info("Check that new '$newComposeCompilerKotlinSupportPluginId' was applied")
-            if (!project.plugins.hasPlugin(newComposeCompilerKotlinSupportPluginId)) {
+            if (!project.plugins.hasPlugin(newComposeCompilerKotlinSupportPluginId) && projectUsesCompose()) {
                 if (ideaIsInSync) logger.error("e: Configuration problem: $newComposeCompilerError")
                 else error("e: Configuration problem: $newComposeCompilerError")
             }
         }
     }
 }
+
+/** A project with no Compose dependency, such as a plain Kotlin/Native program, has no use for the Compose compiler plugin. */
+private fun Project.projectUsesCompose(): Boolean =
+    configurations.any { configuration ->
+        configuration.dependencies.any { it.group?.startsWith("org.jetbrains.compose") == true }
+    }

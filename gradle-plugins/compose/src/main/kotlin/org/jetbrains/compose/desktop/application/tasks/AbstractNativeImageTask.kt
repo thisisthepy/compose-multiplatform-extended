@@ -429,6 +429,8 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val classes = workDir.resolve("support/classes").apply { mkdirs() }
         run(
             listOf(graalvm.resolve("bin/javac").absolutePath, "-d", classes.absolutePath, "--add-modules", "org.graalvm.nativeimage") +
+                // The AwtFree substitutions name Kotlin types, which the application's own classpath holds.
+                (if (names.contains("AwtFreeSubstitutions")) listOf("-cp", runtimeClasspath.files.joinToString(File.pathSeparator)) else emptyList()) +
                 sources.listFiles()!!.map { it.absolutePath },
             workDir.resolve("javac.log"),
         )

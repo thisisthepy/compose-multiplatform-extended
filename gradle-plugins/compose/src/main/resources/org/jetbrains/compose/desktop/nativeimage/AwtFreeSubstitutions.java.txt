@@ -8,6 +8,7 @@ package org.jetbrains.compose.nativeimage;
 import com.oracle.svm.core.annotate.Substitute;
 import com.oracle.svm.core.annotate.TargetClass;
 import java.util.function.BooleanSupplier;
+import kotlin.coroutines.CoroutineContext;
 
 /**
  * Cuts the places where a library Compose draws with reaches AWT by a call that never runs
@@ -49,5 +50,20 @@ final class Target_org_jetbrains_skiko_Actuals_awtKt {
 final class Target_org_jetbrains_skiko_FrameWatcher {
     @Substitute
     public void start() {
+    }
+}
+
+/**
+ * skiko's main dispatcher, which compose-ui's scenes fall back to when no dispatcher is
+ * given, runs everything on AWT's event queue through Swing. An application with no AWT
+ * window has no event queue; its UI thread belongs to the window layer, which passes its own
+ * dispatcher in. The fallback is replaced by a failure that says so.
+ */
+@TargetClass(className = "org.jetbrains.skiko.SwingDispatcher", onlyWith = AwtFreeSubstitutions.AwtFree.class)
+final class Target_org_jetbrains_skiko_SwingDispatcher {
+    @Substitute
+    public void dispatch(CoroutineContext context, Runnable block) {
+        throw new IllegalStateException(
+            "This image has no AWT event queue to run on. Give the scene a coroutine dispatcher of the window layer.");
     }
 }

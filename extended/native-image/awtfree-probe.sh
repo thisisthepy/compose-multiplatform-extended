@@ -11,7 +11,7 @@ sub="$out/support"
 mkdir -p "$sub/src/org/jetbrains/compose/nativeimage" "$sub/classes"
 res=../../../gradle-plugins/compose/src/main/resources/org/jetbrains/compose/desktop/nativeimage
 cp "$res/AwtFreeSubstitutions.java.txt" "$sub/src/org/jetbrains/compose/nativeimage/AwtFreeSubstitutions.java"
-"$GRAALVM_HOME/bin/javac" -d "$sub/classes" --add-modules org.graalvm.nativeimage "$sub"/src/org/jetbrains/compose/nativeimage/*.java || exit 1
+"$GRAALVM_HOME/bin/javac" -d "$sub/classes" --add-modules org.graalvm.nativeimage -cp "$cp" "$sub"/src/org/jetbrains/compose/nativeimage/*.java || exit 1
 cp="$cp:$sub/classes"
 for t in java.awt.Toolkit java.awt.Component java.awt.GraphicsEnvironment java.awt.Window java.awt.image.BufferedImage javax.swing.JComponent sun.awt.SunToolkit java.awt.EventQueue sun.java2d.SunGraphics2D; do
     log="$out/forbidden-$t.log"
@@ -41,11 +41,11 @@ rm -f "$meta/list.tmp"
 # from main (or a build-time root) into java.awt, which forbidding one type at a time does not.
 "$GRAALVM_HOME/bin/native-image" -cp "$cp" probe.MainKt --no-fallback \
     --add-exports=org.graalvm.nativeimage.builder/com.oracle.svm.core.annotate=ALL-UNNAMED --add-exports=org.graalvm.nativeimage.builder/com.oracle.svm.core.jdk=ALL-UNNAMED \
-    -Dcompose.nativeimage.awtFree=true -H:+PrintAnalysisCallTree -H:ReportsPath="$out/reports" \
+    -Dcompose.nativeimage.awtFree=true -H:+PrintAnalysisCallTree -H:+PrintClassInitialization \
     -o "$out/probe-calltree" > "$out/calltree.log" 2>&1
 echo "calltree exit=$?" | tee -a "$out/summary.txt"
-ls -la "$out/reports" >> "$out/summary.txt" 2>&1
-gzip -f "$out"/reports/* 2>/dev/null || true
+find / -name "call_tree*" -newer "$out/summary.txt" 2>/dev/null | head >> "$out/summary.txt"; find "$out" -path "*reports*" | head -20 >> "$out/summary.txt"
+unzip -l "$GRAALVM_HOME"/lib/svm/builder/svm.jar 2>/dev/null | grep -i -E "awt|desktop" | head -50 >> "$out/summary.txt"
 
 # Whether the module graph can be cut at java.desktop.
 "$GRAALVM_HOME/bin/native-image" -cp "$cp" probe.MainKt --no-fallback \

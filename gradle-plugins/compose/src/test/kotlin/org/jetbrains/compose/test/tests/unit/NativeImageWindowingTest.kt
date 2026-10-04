@@ -6,24 +6,35 @@
 package org.jetbrains.compose.test.tests.unit
 
 import org.gradle.testfixtures.ProjectBuilder
-import org.jetbrains.compose.desktop.application.dsl.NativeImageSettings
-import org.jetbrains.compose.desktop.application.dsl.NativeImageWindowing
+import org.jetbrains.compose.desktop.application.dsl.ApplicationOutput
+import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
+import org.jetbrains.compose.desktop.application.internal.JvmApplicationData
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
-/** An application built by packageNativeImage links no AWT unless it asks for it. */
+/** An application built as a native image links no AWT unless it asks for it. */
 class NativeImageWindowingTest {
-    private fun settings() = ProjectBuilder.builder().build().objects.newInstance(NativeImageSettings::class.java)
+    private fun data() = ProjectBuilder.builder().build().let { JvmApplicationData(it.objects, it.providers) }
 
     @Test
-    fun awtFreeIsTheDefault() {
-        assertEquals(NativeImageWindowing.AwtFree, settings().windowing.get())
+    fun jvmOutputIsTheDefaultAndKeepsAwt() {
+        val data = data()
+        assertEquals(ApplicationOutput.Jvm, data.output.get())
+        assertEquals(ApplicationWindowing.Awt, data.windowing.get())
     }
 
     @Test
-    fun awtCanBeChosen() {
-        val settings = settings()
-        settings.windowing.set(NativeImageWindowing.Awt)
-        assertEquals(NativeImageWindowing.Awt, settings.windowing.get())
+    fun nativeImageOutputIsAwtFreeByDefault() {
+        val data = data()
+        data.output.set(ApplicationOutput.NativeImage)
+        assertEquals(ApplicationWindowing.AwtFree, data.windowing.get())
+    }
+
+    @Test
+    fun awtCanBeChosenForNativeImage() {
+        val data = data()
+        data.output.set(ApplicationOutput.NativeImage)
+        data.windowing.set(ApplicationWindowing.Awt)
+        assertEquals(ApplicationWindowing.Awt, data.windowing.get())
     }
 }

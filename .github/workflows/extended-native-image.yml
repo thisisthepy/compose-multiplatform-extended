@@ -92,7 +92,7 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends xvfb xauth libgl1-mesa-dri libxtst6 libxrender1 libxi6 fonts-noto-cjk binutils fakeroot
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
       - name: createDistributable
         working-directory: extended/samples/hello-jvm
         run: ./gradlew --no-daemon createDistributable
@@ -164,8 +164,8 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-${{ matrix.nik }}.tar.gz"
           mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
-          ni="$(find "$RUNNER_TEMP/nik" -path '*/bin/native-image' -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
-          home="$(dirname "$(dirname "$ni")")"
+          rel="$(find "$RUNNER_TEMP/nik" -name release -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
+          home="$(dirname "$rel")"
           echo "GRAALVM_HOME=$home" >> "$GITHUB_ENV"
           "$home/bin/native-image" --version
 
@@ -227,7 +227,7 @@ jobs:
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
 
       # The AwtFree sample: packageNativeImage with the no-JAWT archive, then a headless start.
       - name: packageNativeImage (AwtFree sample)

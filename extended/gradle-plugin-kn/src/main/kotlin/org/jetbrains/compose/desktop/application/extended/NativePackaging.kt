@@ -84,6 +84,9 @@ internal class NativePackagingContext(
         }
 }
 
+/** Whether the application has a window (packaged as an app) or is a command line program (an executable, not packaged). */
+enum class NativeAppKind { Gui, Cli }
+
 /** Packaging for one operating system family. */
 internal interface NativeOsPackager {
     val os: OS
@@ -105,13 +108,14 @@ internal interface NativeOsPackager {
 internal fun registerNativeRunTasks(
     ctx: NativePackagingContext,
     runnableInDistribution: Provider<java.io.File>,
+    runDependency: TaskProvider<*>? = null,
 ) {
     ctx.register<AbstractNativeRunTask>("runNative") {
         dependsOn(ctx.binary.linkTaskProvider)
         executable.set(ctx.executable)
     }
     ctx.register<AbstractNativeRunTask>("runDistributableNative") {
-        dependsOn(ctx.taskName("createDistributableNative"))
+        dependsOn(runDependency ?: ctx.taskName("createDistributableNative"))
         executable.set(ctx.project.layout.file(runnableInDistribution))
     }
 }
@@ -130,6 +134,41 @@ internal fun registerPackageKotlinNative(project: Project, packageTasks: List<Ta
     }
 }
 
+/**
+ * A command line program is not packaged: `.kexe` on macOS and Linux, `.exe` on Windows. On
+ * macOS the `.kexe` is signed, and notarization is an optional task that submits a zip of it.
+ */
+internal fun configureCliExecutable(ctx: NativePackagingContext) {
+    val windows = ctx.binary.target.konanTarget.family == Family.MINGW
+    val name = ctx.packageName(null)
+    val exe = ctx.register<AbstractNativeCliExecutableTask>("createExecutableNative") {
+        dependsOn(ctx.binary.linkTaskProvider)
+        executable.set(ctx.executable)
+        outputName.set(name.map { NativeCliOutput.fileName(it, windows) })
+        outputFile.set(ctx.outputDir("cli").zip(outputName) { dir, file -> dir.file(file) })
+    }
+    var last: TaskProvider<*> = exe
+    if (ctx.binary.target.konanTarget.family == Family.OSX) {
+        val settings = ctx.distributions.macOS
+        val sign = ctx.register<AbstractNativeMacKexeSignTask>("signExecutableNative") {
+            dependsOn(exe)
+            kexe.set(exe.flatMap { it.outputFile })
+            bundleID.set(ctx.project.provider { settings.bundleID ?: "org.example.${name.get()}" })
+            signingSettings = settings.signing
+        }
+        ctx.register<AbstractNativeMacNotarizeTask>("notarizeExecutableNative") {
+            dependsOn(sign)
+            packageFiles.from(exe.flatMap { it.outputFile })
+            notarizationSettings = settings.notarization
+            zipBeforeSubmit.set(true)
+            staple.set(false)
+        }
+        last = sign
+    }
+    registerNativeRunTasks(ctx, exe.flatMap { it.outputFile }.map { it.asFile }, runDependency = last)
+    registerPackageKotlinNative(ctx.project, listOf(last))
+}
+
 // region macOS
 
 internal object MacNativePackager : NativeOsPackager {
@@ -137,6 +176,7 @@ internal object MacNativePackager : NativeOsPackager {
 
     /** Called after upstream created `createDistributableNative` and `packageDmgNative`. */
     override fun configure(ctx: NativePackagingContext) {
+        if (ctx.distributions.appKind == NativeAppKind.Cli) return configureCliExecutable(ctx)
         val settings = ctx.distributions.macOS
         val createName = ctx.taskName("createDistributableNative")
         val create = ctx.project.tasks.named(createName, AbstractNativeMacApplicationPackageAppDirTask::class.java)
@@ -153,6 +193,7 @@ internal object MacNativePackager : NativeOsPackager {
             packageName.set(create.flatMap { it.packageName })
             bundleID.set(create.flatMap { it.bundleID })
             signingSettings = settings.signing
+            appStore.set(ctx.project.provider { settings.appStore })
             entitlements.set(ctx.project.provider { settings.entitlementsFile.orNull?.asFile?.absolutePath })
         }
 
@@ -171,6 +212,19 @@ internal object MacNativePackager : NativeOsPackager {
             packages += notarize
         } else {
             packages += sign
+        }
+        if (TargetFormat.Pkg in ctx.distributions.targetFormats) {
+            packages += ctx.register<AbstractNativeMacApplicationPackagePkgTask>("packagePkgNative") {
+                dependsOn(sign)
+                packageName.set(create.flatMap { it.packageName })
+                packageVersion.set(create.flatMap { it.packageVersion })
+                appDir.set(create.flatMap { it.destinationDir })
+                bundleID.set(create.flatMap { it.bundleID })
+                installDir.set(ctx.project.provider { settings.installationPath ?: "/Applications" })
+                appStore.set(ctx.project.provider { settings.appStore })
+                signingSettings = settings.signing
+                destinationDir.set(ctx.outputDir("pkg"))
+            }
         }
 
         registerNativeRunTasks(ctx, create.flatMap { it.destinationDir }.zip(create.flatMap { it.packageName }) { dir, name ->
@@ -212,6 +266,7 @@ internal object LinuxNativePackager : NativeOsPackager {
     override val os = OS.Linux
 
     override fun configure(ctx: NativePackagingContext) {
+        if (ctx.distributions.appKind == NativeAppKind.Cli) return configureCliExecutable(ctx)
         val settings = ctx.distributions.linux
         fun AbstractNativeLinuxPackageTask.common() {
             packageName.set(ctx.packageName(settings.packageName))
@@ -247,6 +302,15 @@ internal object LinuxNativePackager : NativeOsPackager {
                 destinationDir.set(ctx.outputDir("deb"))
             }
         }
+        if (TargetFormat.Rpm in ctx.distributions.targetFormats) {
+            packages += ctx.register<AbstractNativeLinuxRpmTask>("packageRpmNative") {
+                common()
+                rpmLicense.set(ctx.project.provider { settings.rpmLicenseType })
+                release.set(ctx.project.provider { settings.appRelease ?: "1" })
+                packageVersion.set(ctx.packageVersion(settings.rpmPackageVersion ?: settings.packageVersion))
+                destinationDir.set(ctx.outputDir("rpm"))
+            }
+        }
         registerNativeRunTasks(ctx, appDir.flatMap { it.destinationDir }.zip(appDir.flatMap { it.packageName }) { dir, name ->
             dir.asFile.resolve("$name.AppDir/usr/bin/$name")
         })
@@ -262,6 +326,7 @@ internal object WindowsNativePackager : NativeOsPackager {
     override val os = OS.Windows
 
     override fun configure(ctx: NativePackagingContext) {
+        if (ctx.distributions.appKind == NativeAppKind.Cli) return configureCliExecutable(ctx)
         val settings = ctx.distributions.windows
         val appDir = ctx.register<AbstractNativeWindowsAppDirTask>("createDistributableNative") {
             packageName.set(ctx.packageName(null))

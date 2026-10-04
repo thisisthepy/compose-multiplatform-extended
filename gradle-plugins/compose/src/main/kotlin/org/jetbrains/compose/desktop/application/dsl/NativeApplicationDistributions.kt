@@ -6,10 +6,11 @@
 package org.jetbrains.compose.desktop.application.dsl
 
 import org.gradle.api.Action
+import org.jetbrains.compose.desktop.application.extended.NativeAppKind
 import java.util.*
 
 abstract class NativeApplicationDistributions : AbstractDistributions() {
-    private val supportedFormats = EnumSet.of(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Exe)
+    private val supportedFormats = EnumSet.of(TargetFormat.Dmg, TargetFormat.Pkg, TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Msi, TargetFormat.Exe)
 
     override fun targetFormats(vararg formats: TargetFormat) {
         val unsupportedFormats = formats.filter { it !in supportedFormats }
@@ -22,6 +23,13 @@ abstract class NativeApplicationDistributions : AbstractDistributions() {
         }
         super.targetFormats(*formats)
     }
+
+    /**
+     * [NativeAppKind.Gui] (the default) makes an application and the packages named in
+     * `targetFormats`. [NativeAppKind.Cli] makes the bare executable (`.kexe`, or `.exe` on
+     * Windows) and no package.
+     */
+    var appKind: NativeAppKind = NativeAppKind.Gui
 
     val linux: LinuxPlatformSettings = objects.newInstance(LinuxPlatformSettings::class.java)
     open fun linux(fn: Action<LinuxPlatformSettings>) {

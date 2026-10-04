@@ -66,6 +66,9 @@ abstract class AbstractNativeMacSignTask : AbstractComposeDesktopTask() {
     @get:Internal
     internal var signingSettings: MacOSSigningSettings? = null
 
+    @get:Input
+    val appStore: Property<Boolean> = objects.property<Boolean>().value(false)
+
     @TaskAction
     fun run() {
         val app = appDir.ioFile.resolve("${packageName.get()}.app")
@@ -73,7 +76,7 @@ abstract class AbstractNativeMacSignTask : AbstractComposeDesktopTask() {
         val settings = signingSettings
         val signer: MacSigner = if (settings != null && !settings.identity.orNull.isNullOrEmpty()) {
             MacSignerImpl(
-                settings.validate(bundleID, project, project.provider { false }),
+                settings.validate(bundleID, project, appStore),
                 runExternalTool
             )
         } else {
@@ -106,6 +109,14 @@ abstract class AbstractNativeMacNotarizeTask : AbstractComposeDesktopTask() {
     @get:Internal
     internal var notarizationSettings: MacOSNotarizationSettings? = null
 
+    /** Staple the ticket to the file. A bare executable cannot carry one, so it is not stapled. */
+    @get:Input
+    val staple: Property<Boolean> = objects.property<Boolean>().value(true)
+
+    /** Submit a zip of the file, which is what Apple accepts for an executable that is not a disk image or a package. */
+    @get:Input
+    val zipBeforeSubmit: Property<Boolean> = objects.property<Boolean>().value(false)
+
     @TaskAction
     fun run() {
         val settings = notarizationSettings
@@ -118,18 +129,73 @@ abstract class AbstractNativeMacNotarizeTask : AbstractComposeDesktopTask() {
         }
         val validated = settings.validate()
         for (file in packageFiles.files.filter { it.isFile }) {
+            val submitted = if (zipBeforeSubmit.get()) {
+                project.layout.buildDirectory.file("compose/tmp/$name/${file.name}.zip").get().asFile.also {
+                    it.parentFile.mkdirs()
+                    it.delete()
+                    runExternalTool(
+                        File("/usr/bin/ditto"),
+                        listOf("-c", "-k", "--keepParent", file.absolutePath, it.absolutePath)
+                    )
+                }
+            } else file
             runExternalTool(
                 tool = MacUtils.xcrun,
                 args = listOf(
                     "notarytool", "submit", "--wait",
                     "--apple-id", validated.appleID,
                     "--team-id", validated.teamID,
-                    file.absolutePath
+                    submitted.absolutePath
                 ),
                 stdinStr = validated.password
             )
-            runExternalTool(MacUtils.xcrun, listOf("stapler", "staple", file.absolutePath))
+            if (staple.get()) runExternalTool(MacUtils.xcrun, listOf("stapler", "staple", file.absolutePath))
         }
+    }
+}
+
+/**
+ * A `.pkg` installer of the `.app`, made with `productbuild`. It is signed with the matching
+ * installer certificate when `macOS.signing` names an identity, and left unsigned otherwise.
+ * A `.pkg` is the store form: it goes to the Mac App Store (`macOS.appStore = true`, which signs
+ * with the "3rd Party Mac Developer" certificates) or is notarized and distributed outside it.
+ */
+@DisableCachingByDefault(because = "Runs productbuild")
+abstract class AbstractNativeMacApplicationPackagePkgTask : AbstractNativeMacApplicationPackageTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    val appDir: DirectoryProperty = objects.directoryProperty()
+
+    @get:Input
+    val installDir: Property<String> = objects.property<String>().value("/Applications")
+
+    @get:Input
+    val bundleID: Property<String> = objects.property()
+
+    @get:Input
+    val appStore: Property<Boolean> = objects.property<Boolean>().value(false)
+
+    @get:Internal
+    internal var signingSettings: MacOSSigningSettings? = null
+
+    override fun createPackage(destinationDir: File, workingDir: File) {
+        val app = appDir.ioFile.resolve("${packageName.get()}.app")
+        check(app.isDirectory) { "No application bundle to package at ${app.absolutePath}" }
+        val pkg = destinationDir.resolve("${fullPackageName.get()}.pkg")
+        val settings = signingSettings
+        val identity = settings?.identity?.orNull?.takeIf { it.isNotEmpty() }
+        val args = buildList {
+            add("--component"); add(app.absolutePath); add(installDir.get())
+            if (identity != null) {
+                add("--sign"); add(PkgSigning.installerIdentity(identity, appStore.get()))
+                settings?.keychain?.orNull?.let { add("--keychain"); add(it) }
+            }
+            add(pkg.absolutePath)
+        }
+        runExternalTool(File("/usr/bin/productbuild"), args)
+        if (identity == null) logger.lifecycle("No signing identity is set: ${pkg.name} is unsigned")
+        NativeChecksums.write(destinationDir, listOf(pkg))
+        logger.lifecycle("The distribution is written to ${pkg.canonicalPath}")
     }
 }
 
@@ -152,6 +218,75 @@ abstract class AbstractNativeMacLipoTask : AbstractComposeDesktopTask() {
             listOf("-create", "-output", output.absolutePath) + executables.files.map { it.absolutePath }
         )
         output.makeExecutable()
+    }
+}
+
+// endregion
+
+// region CLI executables
+
+/**
+ * Copies the linked executable to `<name>.kexe` (`<name>.exe` on Windows). There is no
+ * packaging: the executable is the output. Nothing is changed in it, so the linker's own
+ * signature on macOS stays valid.
+ */
+@DisableCachingByDefault(because = "Copies one file")
+abstract class AbstractNativeCliExecutableTask : AbstractComposeDesktopTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.ABSOLUTE)
+    val executable: RegularFileProperty = objects.fileProperty()
+
+    @get:Input
+    val outputName: Property<String> = objects.property()
+
+    @get:OutputFile
+    val outputFile: RegularFileProperty = objects.fileProperty()
+
+    @TaskAction
+    fun run() {
+        val out = outputFile.ioFile
+        out.parentFile.mkdirs()
+        executable.ioFile.copyTo(out, overwrite = true)
+        out.makeExecutable()
+        logger.lifecycle("The executable is written to ${out.canonicalPath}")
+    }
+}
+
+/**
+ * Signs a macOS `.kexe`. A Developer ID identity signs it with the hardened runtime. Without
+ * one the linker's ad hoc signature is kept while it verifies, and the file is signed ad hoc
+ * again when it no longer does (after a post-link edit).
+ */
+@DisableCachingByDefault(because = "Signs with a keychain identity of the local machine")
+abstract class AbstractNativeMacKexeSignTask : AbstractComposeDesktopTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.ABSOLUTE)
+    val kexe: RegularFileProperty = objects.fileProperty()
+
+    @get:Input
+    val bundleID: Property<String> = objects.property()
+
+    @get:Internal
+    internal var signingSettings: MacOSSigningSettings? = null
+
+    @TaskAction
+    fun run() {
+        val file = kexe.ioFile
+        val settings = signingSettings
+        val hasIdentity = settings != null && !settings.identity.orNull.isNullOrEmpty()
+        val valid = runExternalTool(
+            MacUtils.codesign, listOf("--verify", "--strict", file.absolutePath), checkExitCodeIsNormal = false
+        ).exitValue == 0
+        when (NativeCliOutput.macSigning(hasIdentity, valid)) {
+            NativeCliOutput.MacSigning.DeveloperId ->
+                MacSignerImpl(settings!!.validate(bundleID, project, project.provider { false }), runExternalTool).sign(file)
+            NativeCliOutput.MacSigning.KeepLinkerSignature ->
+                logger.lifecycle("Keeping the linker's signature on ${file.name}")
+            NativeCliOutput.MacSigning.ReSignAdHoc -> {
+                logger.lifecycle("The signature on ${file.name} no longer verifies: signing it ad hoc")
+                NoCertificateSigner(runExternalTool).sign(file)
+            }
+        }
     }
 }
 
@@ -321,7 +456,69 @@ abstract class AbstractNativeLinuxDebTask : AbstractNativeLinuxPackageTask() {
             tool = findOnPath("dpkg-deb") ?: error("dpkg-deb was not found; install the dpkg package."),
             args = listOf("--build", "--root-owner-group", stage.absolutePath, deb.absolutePath)
         )
+        NativeChecksums.write(destinationDir, listOf(deb))
         logger.lifecycle("The distribution is written to ${deb.canonicalPath}")
+    }
+}
+
+/** An `.rpm` of the application, from a staged tree and a spec file, built with `rpmbuild`. */
+@DisableCachingByDefault(because = "Runs rpmbuild")
+abstract class AbstractNativeLinuxRpmTask : AbstractNativeLinuxPackageTask() {
+    @get:Input
+    @get:Optional
+    val rpmLicense: Property<String> = objects.property()
+
+    @get:Input
+    val release: Property<String> = objects.property<String>().value("1")
+
+    override fun createPackage(destinationDir: File, workingDir: File) {
+        val rpmName = DebControl.debianPackageName(appName)
+        val stage = workingDir.resolve("rpm-root").apply { deleteRecursively(); mkdirs() }
+        val installDir = stage.resolve("opt/$rpmName").apply { mkdirs() }
+        val exe = installDir.resolve(appName)
+        executable.ioFile.copyTo(exe, overwrite = true)
+        exe.makeExecutable()
+        copyResources(installDir)
+        val files = mutableListOf("/opt/$rpmName", "/usr/bin/$rpmName", "/usr/share/applications/$rpmName.desktop")
+        iconFile.orNull?.asFile?.let {
+            it.copyTo(stage.resolve("usr/share/icons/hicolor/256x256/apps/$rpmName.png").apply { parentFile.mkdirs() })
+            files += "/usr/share/icons/hicolor/256x256/apps/$rpmName.png"
+        }
+        stage.resolve("usr/bin").mkdirs()
+        java.nio.file.Files.createSymbolicLink(
+            stage.resolve("usr/bin/$rpmName").toPath(),
+            java.nio.file.Paths.get("/opt/$rpmName/$appName")
+        )
+        stage.resolve("usr/share/applications/$rpmName.desktop").apply {
+            parentFile.mkdirs()
+            writeText(desktopEntry(exec = "/opt/$rpmName/$appName", icon = rpmName))
+        }
+        val arch = RpmSpec.architecture(architecture.get())
+        val topDir = workingDir.resolve("rpmbuild").apply { deleteRecursively(); mkdirs() }
+        val spec = workingDir.resolve("$rpmName.spec")
+        spec.writeText(
+            RpmSpec.render(
+                name = appName,
+                version = packageVersion.get(),
+                release = release.get(),
+                summary = appDescription.orNull?.lineSequence()?.firstOrNull { it.isNotBlank() } ?: appName,
+                license = rpmLicense.getOrElse("Proprietary"),
+                description = appDescription.orNull ?: appName,
+                vendor = vendor.orNull,
+                architecture = arch,
+                stageDir = stage.absolutePath,
+                files = files,
+            )
+        )
+        runExternalTool(
+            findOnPath("rpmbuild") ?: error("rpmbuild was not found; install the rpm-build package."),
+            listOf("-bb", "--define", "_topdir ${topDir.absolutePath}", "--noclean", spec.absolutePath)
+        )
+        val built = topDir.resolve("RPMS").walk().filter { it.isFile && it.name.endsWith(".rpm") }.toList()
+        check(built.isNotEmpty()) { "rpmbuild made no package under ${topDir.resolve("RPMS")}" }
+        built.forEach { it.copyTo(destinationDir.resolve(it.name), overwrite = true) }
+        NativeChecksums.write(destinationDir, built.map { destinationDir.resolve(it.name) })
+        logger.lifecycle("The distribution is written to ${destinationDir.resolve(built.first().name).canonicalPath}")
     }
 }
 

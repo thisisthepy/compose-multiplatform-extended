@@ -21,28 +21,34 @@ abstract class NativeApplication @Inject constructor(
     internal abstract val objects: ObjectFactory
 
     internal val _targets = arrayListOf<KotlinNativeTarget>()
+
+    /** Linking settings shared by every target. See [NativeBinarySettings]. */
+    val binarySettings: NativeBinarySettings = objects.newInstance(NativeBinarySettings::class.java)
+    fun binarySettings(fn: Action<NativeBinarySettings>) {
+        fn.execute(binarySettings)
+    }
+
     fun targets(vararg targets: KotlinTarget) {
         val nonNativeTargets = arrayListOf<KotlinTarget>()
-        val nonMacOSTargets = arrayListOf<KotlinNativeTarget>()
+        val unsupportedTargets = arrayListOf<KotlinNativeTarget>()
         for (target in targets) {
             if (target is KotlinNativeTarget) {
-                if (target.konanTarget.family == Family.OSX) {
+                if (target.konanTarget.family in supportedFamilies) {
                     _targets.add(target)
                 } else {
-                    nonMacOSTargets.add(target)
+                    unsupportedTargets.add(target)
                 }
             } else {
                 nonNativeTargets.add(target)
             }
         }
 
-        check(nonNativeTargets.isEmpty() && nonMacOSTargets.isEmpty()) {
+        check(nonNativeTargets.isEmpty() && unsupportedTargets.isEmpty()) {
             buildString {
-                appendLine("compose.nativeApplication.targets supports only Kotlin/Native macOS targets for now:")
+                appendLine("compose.nativeApplication.targets supports Kotlin/Native macOS, Linux and mingwX64 targets:")
                 nonNativeTargets.forEach { appendLine("* '${it.name}' is not a native target;") }
-                nonMacOSTargets.forEach { appendLine("* '${it.name}' is not a macOS target;") }
+                unsupportedTargets.forEach { appendLine("* '${it.name}' is not a desktop target;") }
             }
-
         }
     }
 
@@ -50,5 +56,8 @@ abstract class NativeApplication @Inject constructor(
     fun distributions(fn: Action<NativeApplicationDistributions>) {
         fn.execute(distributions)
     }
-}
 
+    private companion object {
+        val supportedFamilies = setOf(Family.OSX, Family.LINUX, Family.MINGW)
+    }
+}

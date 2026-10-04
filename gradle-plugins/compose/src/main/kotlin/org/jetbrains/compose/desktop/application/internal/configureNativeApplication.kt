@@ -19,7 +19,9 @@ import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentOS
 import org.jetbrains.compose.internal.utils.joinLowerCamelCase
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBinary
+import org.jetbrains.kotlin.konan.target.Family
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeOutputKind
 import java.util.*
 
@@ -28,8 +30,6 @@ internal fun configureNativeApplication(
     app: NativeApplication,
     unpackDefaultResources: TaskProvider<AbstractUnpackDefaultComposeApplicationResourcesTask>
 ) {
-    if (currentOS != OS.MacOS) return
-
     for (target in app._targets) {
         configureNativeApplication(project, app, target, unpackDefaultResources)
     }
@@ -43,7 +43,11 @@ private fun configureNativeApplication(
 ) {
     for (binary in target.binaries) {
         if (binary.outputKind == NativeOutputKind.EXECUTABLE) {
-            configureNativeApplication(project, app, binary, unpackDefaultResources)
+            configureNativeBinary(app, binary)
+            // The .app and dmg are macOS only; Linux packaging is a separate task set.
+            if (target.konanTarget.family == Family.OSX && currentOS == OS.MacOS) {
+                configureNativeApplication(project, app, binary, unpackDefaultResources)
+            }
         }
     }
 }
@@ -91,6 +95,21 @@ private fun configureNativeApplication(
                 app.distributions.macOS.installationPath ?: "/Applications"
             })
         }
+    }
+}
+
+private fun configureNativeBinary(app: NativeApplication, binary: NativeBinary) {
+    val settings = app.binarySettings
+    binary.linkerOpts(
+        *nativeDesktopLinkerOpts(
+            family = binary.target.konanTarget.family,
+            skikoDirectory = settings.nativeSkikoDirectory.asFile.orNull?.absolutePath,
+            linkWindowSystem = settings.linkWindowSystem.get(),
+            extra = settings.linkerOpts.get()
+        ).toTypedArray()
+    )
+    if (binary is Executable && settings.entryPoint.isPresent) {
+        binary.entryPoint = settings.entryPoint.get()
     }
 }
 

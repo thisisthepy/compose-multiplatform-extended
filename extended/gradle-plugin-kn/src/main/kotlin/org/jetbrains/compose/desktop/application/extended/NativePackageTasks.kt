@@ -78,8 +78,6 @@ abstract class AbstractNativeMacSignTask : AbstractComposeDesktopTask() {
             )
         } else {
             logger.lifecycle("No signing identity is set: signing ${app.name} ad hoc")
-            // Next to the app, so it goes into the disk image: how to open a copy Gatekeeper blocks.
-            appDir.ioFile.resolve("If macOS will not open the app.txt").writeText(InstallNotes.macGatekeeper(packageName.get()))
             NoCertificateSigner(runExternalTool)
         }
         val entitlementsFile = entitlements.orNull?.let(::File)
@@ -186,23 +184,11 @@ abstract class AbstractNativeLinuxPackageTask : AbstractNativeMacApplicationPack
     val vendor: Property<String> = objects.property()
 
     @get:Input
+    @get:Optional
+    val maintainer: Property<String> = objects.property()
+
+    @get:Input
     val architecture: Property<String> = objects.property<String>().value("amd64")
-
-    /** Reverse DNS id of the application, for the metainfo, desktop file and Flatpak. */
-    @get:Input
-    val appId: Property<String> = objects.property()
-
-    @get:Input
-    @get:Optional
-    val appSummary: Property<String> = objects.property()
-
-    @get:Input
-    @get:Optional
-    val appLicense: Property<String> = objects.property()
-
-    @get:Input
-    @get:Optional
-    val appHomepage: Property<String> = objects.property()
 
     @get:Input
     val fileAssociationMimeTypes: ListProperty<String> = objects.listProperty(String::class.java)
@@ -213,20 +199,6 @@ abstract class AbstractNativeLinuxPackageTask : AbstractNativeMacApplicationPack
     val composeResourcesDirs: ConfigurableFileCollection = objects.fileCollection()
 
     protected val appName: String get() = packageName.get()
-
-    protected fun linuxMetadata(): LinuxAppMetadata = LinuxAppMetadata(
-        id = appId.get(),
-        name = appName,
-        summary = appSummary.orNull ?: appDescription.orNull?.lineSequence()?.firstOrNull() ?: appName,
-        description = (appDescription.orNull ?: appName).lines().filter { it.isNotBlank() },
-        version = packageVersion.get(),
-        date = java.time.LocalDate.now().toString(),
-        executable = appName,
-        developerName = vendor.orNull ?: appName,
-        license = appLicense.getOrElse("LicenseRef-proprietary"),
-        homepage = appHomepage.orNull,
-        categories = appCategory.orNull,
-    )
 
     protected fun desktopEntry(exec: String, icon: String): String = LinuxDesktopEntry.render(
         name = appName,
@@ -250,7 +222,7 @@ abstract class AbstractNativeLinuxPackageTask : AbstractNativeMacApplicationPack
 /**
  * The AppDir layout: `usr/bin/<name>`, its resources beside it, `<name>.desktop`, the icon,
  * `.DirIcon` and an `AppRun` that starts the executable. It runs as it is, and it is what the
- * AppImage and the Flatpak are made from.
+ * AppImage and the deb are made from.
  */
 @DisableCachingByDefault(because = "Stages files")
 abstract class AbstractNativeLinuxAppDirTask : AbstractNativeLinuxPackageTask() {
@@ -269,11 +241,6 @@ abstract class AbstractNativeLinuxAppDirTask : AbstractNativeLinuxPackageTask() 
             it.copyTo(appDir.resolve(".DirIcon"), overwrite = true)
         }
         appDir.resolve("$appName.desktop").writeText(desktopEntry(exec = appName, icon = appName))
-        val meta = linuxMetadata()
-        appDir.resolve("usr/share/metainfo/${AppStreamMetainfo.appdataFileName(meta)}").apply {
-            parentFile.mkdirs()
-            writeText(AppStreamMetainfo.render(meta))
-        }
         appDir.resolve("AppRun").apply {
             writeText("#!/bin/sh\nHERE=\"\$(dirname \"\$(readlink -f \"\$0\")\")\"\nexec \"\$HERE/usr/bin/$appName\" \"\$@\"\n")
             makeExecutable()
@@ -292,11 +259,6 @@ abstract class AbstractNativeLinuxAppImageTask : AbstractNativeLinuxPackageTask(
     @get:Optional
     val appImageTool: Property<String> = objects.property()
 
-    /** Embedded update information, and a `.zsync` file written beside the AppImage. */
-    @get:Input
-    @get:Optional
-    val updateInformation: Property<String> = objects.property()
-
     override fun createPackage(destinationDir: File, workingDir: File) {
         val tool = appImageTool.orNull?.let(::File) ?: findOnPath("appimagetool")
             ?: error(
@@ -307,14 +269,10 @@ abstract class AbstractNativeLinuxAppImageTask : AbstractNativeLinuxPackageTask(
         val dir = appDir.ioFile.resolve("$appName.AppDir")
         runExternalTool(
             tool = tool,
-            args = listOf("--appimage-extract-and-run") +
-                (updateInformation.orNull?.let { listOf("-u", it) } ?: emptyList()) +
-                listOf(dir.absolutePath, out.absolutePath),
-            workingDir = destinationDir,
+            args = listOf("--appimage-extract-and-run", dir.absolutePath, out.absolutePath),
             environment = mapOf("ARCH" to architecture.get().appImageArch())
         )
         out.makeExecutable()
-        NativeChecksums.write(destinationDir, listOf(out, File(out.path + ".zsync")))
         logger.lifecycle("The distribution is written to ${out.canonicalPath}")
     }
 
@@ -367,64 +325,6 @@ abstract class AbstractNativeLinuxDebTask : AbstractNativeLinuxPackageTask() {
     }
 }
 
-/**
- * A `.flatpak` bundle: the executable and its resources, a Flatpak manifest, AppStream
- * metainfo and a desktop file, built with `flatpak-builder` and exported with
- * `flatpak build-bundle`. The manifest and the staged sources are kept beside the bundle, which
- * is what Flathub reviews.
- */
-@DisableCachingByDefault(because = "Runs flatpak-builder")
-abstract class AbstractNativeLinuxFlatpakTask : AbstractNativeLinuxPackageTask() {
-    @get:Input
-    val runtimeVersion: Property<String> = objects.property<String>().value(FlatpakManifest.DEFAULT_RUNTIME_VERSION)
-
-    @get:Input
-    val wayland: Property<Boolean> = objects.property<Boolean>().value(false)
-
-    @get:Input
-    val extraFinishArgs: ListProperty<String> = objects.listProperty(String::class.java)
-
-    override fun createPackage(destinationDir: File, workingDir: File) {
-        val meta = linuxMetadata()
-        val source = destinationDir.resolve("flatpak-source").apply { deleteRecursively(); mkdirs() }
-        val payload = source.resolve("payload").apply { mkdirs() }
-        val exe = payload.resolve(appName)
-        executable.ioFile.copyTo(exe, overwrite = true)
-        exe.makeExecutable()
-        copyResources(payload)
-        // The module's source is the payload directory, so the packaging files sit inside it.
-        payload.resolve("${meta.id}.desktop").writeText(desktopEntry(exec = appName, icon = meta.id))
-        payload.resolve(AppStreamMetainfo.fileName(meta)).writeText(AppStreamMetainfo.render(meta))
-        val icon = iconFile.orNull?.asFile?.also { it.copyTo(payload.resolve("${meta.id}.png"), overwrite = true) }
-        source.resolve("${meta.id}.json").writeText(
-            FlatpakManifest.render(
-                meta,
-                payloadDir = "payload",
-                runtimeVersion = runtimeVersion.get(),
-                wayland = wayland.get(),
-                extraFinishArgs = extraFinishArgs.getOrElse(emptyList()),
-                iconFile = icon?.let { "${meta.id}.png" },
-            )
-        )
-        val builder = findOnPath("flatpak-builder")
-            ?: error("flatpak-builder was not found; install the flatpak-builder package and the ${FlatpakManifest.DEFAULT_RUNTIME}/${FlatpakManifest.DEFAULT_SDK} ${runtimeVersion.get()} runtime and SDK.")
-        val repo = workingDir.resolve("repo")
-        val build = workingDir.resolve("build")
-        runExternalTool(
-            builder,
-            listOf("--force-clean", "--disable-rofiles-fuse", "--repo=${repo.absolutePath}", build.absolutePath, source.resolve("${meta.id}.json").absolutePath),
-            workingDir = source
-        )
-        val bundle = destinationDir.resolve("${meta.id}-${packageVersion.get()}-${architecture.get()}.flatpak")
-        runExternalTool(
-            findOnPath("flatpak") ?: error("flatpak was not found; install the flatpak package."),
-            listOf("build-bundle", repo.absolutePath, bundle.absolutePath, meta.id)
-        )
-        NativeChecksums.write(destinationDir, listOf(bundle))
-        logger.lifecycle("The distribution is written to ${bundle.canonicalPath}")
-    }
-}
-
 // endregion
 
 // region Windows
@@ -468,7 +368,6 @@ abstract class AbstractNativeWindowsAppDirTask : AbstractNativeMacApplicationPac
                 spec.into(dir.resolve("compose-resources").apply { mkdirs() })
             }
         }
-        NativeChecksums.write(dir, listOf(exe))
     }
 }
 
@@ -555,135 +454,6 @@ abstract class AbstractNativeWindowsMsiTask : AbstractNativeMacApplicationPackag
     }
 }
 
-/**
- * An `.msix` and an `.msixbundle` of the application folder, packed with MakeAppx. The
- * package is signed when `msix { certificateFile }` is set. Without a certificate it is left
- * unsigned and an install note is written beside it. The SHA-256 of each file is recorded in
- * `checksums.sha256`.
- */
-@DisableCachingByDefault(because = "Runs the Windows SDK's MakeAppx")
-abstract class AbstractNativeWindowsMsixTask : AbstractNativeMacApplicationPackageTask() {
-    @get:InputDirectory
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    val appDir: DirectoryProperty = objects.directoryProperty()
-
-    @get:InputFile
-    @get:PathSensitive(PathSensitivity.ABSOLUTE)
-    val iconPng: RegularFileProperty = objects.fileProperty()
-
-    @get:Input
-    val identityName: Property<String> = objects.property()
-
-    @get:Input
-    val publisher: Property<String> = objects.property()
-
-    @get:Input
-    val publisherDisplayName: Property<String> = objects.property()
-
-    @get:Input
-    @get:Optional
-    val appDescription: Property<String> = objects.property()
-
-    @get:Input
-    val channel: Property<MsixChannel> = objects.property()
-
-    @get:Input
-    @get:Optional
-    val revision: Property<Int> = objects.property()
-
-    @get:Input
-    val capabilities: ListProperty<String> = objects.listProperty(String::class.java)
-
-    @get:Input
-    val languages: ListProperty<String> = objects.listProperty(String::class.java)
-
-    @get:Input
-    val architecture: Property<String> = objects.property<String>().value("x64")
-
-    @get:Internal
-    internal var certificateFile: String? = null
-
-    @get:Internal
-    internal var certificatePassword: String? = null
-
-    override fun createPackage(destinationDir: File, workingDir: File) {
-        val name = packageName.get()
-        val version = MsixVersion.fromSemver(packageVersion.get(), channel.get(), revision.orNull)
-        val arch = if (architecture.get() == "arm64") MsixArch.Arm64 else MsixArch.X64
-        val meta = MsixMetadata(
-            displayName = name,
-            publisherDisplayName = publisherDisplayName.get(),
-            description = appDescription.getOrElse(name),
-            identityName = identityName.get(),
-            publisher = publisher.get(),
-            languages = languages.get(),
-            capabilities = capabilities.get(),
-        )
-        val layout = workingDir.resolve("layout").apply { deleteRecursively(); mkdirs() }
-        appDir.ioFile.resolve(name).copyRecursively(layout, overwrite = true)
-        layout.resolve("AppxManifest.xml").writeText(MsixManifest.render(meta, version, arch, "$name.exe"))
-        MsixAssets.writeAll(iconPng.ioFile, layout.resolve(MsixAssets.DIR))
-
-        val makeappx = WindowsSdk.findTool("makeappx.exe")
-        val packageFile = destinationDir.resolve("${meta.identityName}_${version}_${arch.text}.msix")
-        runExternalTool(makeappx, listOf("pack", "/o", "/d", layout.absolutePath, "/p", packageFile.absolutePath))
-        val bundleSource = workingDir.resolve("bundle-src").apply { deleteRecursively(); mkdirs() }
-        packageFile.copyTo(bundleSource.resolve(packageFile.name))
-        val bundle = destinationDir.resolve("${meta.identityName}_$version.msixbundle")
-        runExternalTool(makeappx, listOf("bundle", "/o", "/bv", version.toString(), "/d", bundleSource.absolutePath, "/p", bundle.absolutePath))
-
-        val certificate = certificateFile
-        if (certificate != null) {
-            val signtool = WindowsSdk.findTool("signtool.exe")
-            for (file in listOf(packageFile, bundle)) {
-                runExternalTool(
-                    signtool,
-                    listOfNotNull("sign", "/fd", "SHA256", "/f", certificate, certificatePassword?.let { "/p" }, certificatePassword, file.absolutePath)
-                )
-            }
-        } else {
-            destinationDir.resolve("INSTALL.txt").writeText(InstallNotes.unsignedMsix(packageFile.name))
-            logger.lifecycle("No certificate is set: ${packageFile.name} is unsigned. See INSTALL.txt beside it.")
-        }
-        NativeChecksums.write(destinationDir, listOf(packageFile, bundle))
-        logger.lifecycle("The distribution is written to ${packageFile.canonicalPath}")
-    }
-}
-
-/**
- * Runs the Windows App Certification Kit on the package, the check Partner Center runs on a
- * submission. It needs Windows, the SDK's kit, and a package signed with a certificate the
- * machine trusts.
- */
-@DisableCachingByDefault(because = "Runs the certification kit")
-abstract class AbstractNativeWindowsWackTask : AbstractComposeDesktopTask() {
-    @get:InputFiles
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    val packageFiles: ConfigurableFileCollection = objects.fileCollection()
-
-    @get:OutputFile
-    val report: RegularFileProperty = objects.fileProperty()
-
-    @TaskAction
-    fun run() {
-        val file = packageFiles.files.firstOrNull { it.name.endsWith(".msix") || it.name.endsWith(".msixbundle") }
-            ?: error("There is no .msix or .msixbundle to certify.")
-        val appcert = WindowsSdk.findKitTool("App Certification Kit", "appcert.exe")
-        val out = report.ioFile.apply { parentFile.mkdirs(); delete() }
-        runExternalTool(appcert, listOf("reset"))
-        val result = runExternalTool(
-            appcert,
-            listOf("test", "-appxpackagepath", file.absolutePath, "-reportoutputpath", out.absolutePath),
-            checkExitCodeIsNormal = false
-        )
-        check(out.isFile) { "The certification kit wrote no report (exit ${result.exitValue})." }
-        val text = out.readText()
-        val failed = Regex("""RESULT="FAIL"""").containsMatchIn(text) || Regex("""OVERALL_RESULT="FAIL"""").containsMatchIn(text)
-        check(!failed) { "The Windows App Certification Kit reported failures; see ${out.absolutePath}" }
-        logger.lifecycle("The certification report is written to ${out.absolutePath}")
-    }
-}
-
 // endregion
 
 /** Starts an executable, for the run tasks. */
@@ -710,40 +480,3 @@ abstract class AbstractNativeRunTask : AbstractComposeDesktopTask() {
 internal fun findOnPath(tool: String): File? =
     System.getenv("PATH").orEmpty().split(File.pathSeparator).filter { it.isNotBlank() }
         .map { File(it, tool) }.firstOrNull { it.isFile && it.canExecute() }
-
-/** Finding the Windows SDK's packaging tools. */
-internal object WindowsSdk {
-    /** `10.0.22621.0` as numbers, or null when it is not four of them. */
-    fun sdkVersion(name: String): List<Int>? =
-        name.split('.').map { it.toIntOrNull() ?: return null }.takeIf { it.size == 4 }
-
-    /** The newest `<kits>/bin/<version>/<host>/<tool>`. */
-    fun newestInKits(kits: File, host: String, tool: String): File? =
-        kits.resolve("bin").listFiles().orEmpty()
-            .mapNotNull { dir -> sdkVersion(dir.name)?.let { it to dir.resolve(host).resolve(tool) } }
-            .filter { it.second.isFile }
-            .maxWithOrNull(compareBy<Pair<List<Int>, File>> { it.first[0] }.thenBy { it.first[1] }.thenBy { it.first[2] }.thenBy { it.first[3] })
-            ?.second
-
-    /** `COMPOSE_WINDOWS_SDK_BIN`, else the newest installed Windows 10/11 SDK, else `PATH`. */
-    fun findTool(tool: String): File {
-        System.getenv("COMPOSE_WINDOWS_SDK_BIN")?.let {
-            val candidate = File(it, tool)
-            check(candidate.isFile) { "COMPOSE_WINDOWS_SDK_BIN is set, and $candidate is not there" }
-            return candidate
-        }
-        val host = if (System.getProperty("os.arch").lowercase().contains("aarch64")) "arm64" else "x64"
-        for (root in listOf("ProgramFiles(x86)", "ProgramFiles")) {
-            System.getenv(root)?.let { newestInKits(File(it, "Windows Kits/10"), host, tool) }?.let { return it }
-        }
-        findOnPath(tool)?.let { return it }
-        error("$tool was not found: install the Windows SDK, or set COMPOSE_WINDOWS_SDK_BIN to the directory that holds it.")
-    }
-
-    fun findKitTool(kit: String, tool: String): File {
-        for (root in listOf("ProgramFiles(x86)", "ProgramFiles")) {
-            System.getenv(root)?.let { File(it, "Windows Kits/10/$kit/$tool") }?.takeIf { it.isFile }?.let { return it }
-        }
-        error("$tool was not found: the $kit ships with the Windows SDK.")
-    }
-}

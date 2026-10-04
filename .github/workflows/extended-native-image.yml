@@ -248,6 +248,32 @@ jobs:
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
+      # The window layer link check: a plain AwtFree main that opens one window through the
+      # extended window module. packageNativeImage compiles and links appkit_window.m or
+      # x11_window.c and the upcall table, so a link error in the window sources shows here.
+      - name: packageNativeImage (AwtFree link sample)
+        working-directory: extended/native-image/hello-awtfree-link
+        env:
+          SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
+          CORE_EXTENDED: ${{ github.workspace }}/core-extended
+        shell: bash
+        run: ./gradlew --no-daemon --info packageNativeImage
+
+      - name: Start the AwtFree link sample
+        working-directory: extended/native-image/hello-awtfree-link
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=$(find build/compose/native-image -maxdepth 2 -type f -perm -u+x | head -1)
+          single="$RUNNER_TEMP/link"; rm -rf "$single"; mkdir -p "$single"; cp "$exe" "$single/app"
+          cd "$single"
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a timeout 120 ./app | tee out.txt
+          else
+            timeout 120 ./app | tee out.txt
+          fi
+          grep -q "link check ok" out.txt
+
       - name: "compose-rust/pythonx: config check on the generated metadata"
         shell: bash
         run: |

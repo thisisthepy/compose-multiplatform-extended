@@ -13,6 +13,8 @@ import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.jvm.tasks.Jar
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.extended.configureBundleFormat
+import org.jetbrains.compose.desktop.application.extended.isBundleFormat
 import org.jetbrains.compose.desktop.application.internal.validation.validatePackageVersions
 import org.jetbrains.compose.desktop.application.tasks.*
 import org.jetbrains.compose.desktop.tasks.AbstractJarsFlattenTask
@@ -171,6 +173,9 @@ private fun JvmApplicationContext.configurePackagingTasks(
     }
 
     val packageFormats = app.nativeDistributions.targetFormats.map { targetFormat ->
+        if (targetFormat.isBundleFormat) {
+            return@map configureBundleFormat(targetFormat, createDistributable, commonTasks.unpackDefaultResources)
+        }
         val packageFormat = tasks.register<AbstractJPackageTask>(
             taskNameAction = "package",
             taskNameObject = targetFormat.name,

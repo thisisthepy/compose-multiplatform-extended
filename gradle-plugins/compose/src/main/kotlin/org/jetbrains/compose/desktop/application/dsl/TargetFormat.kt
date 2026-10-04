@@ -18,14 +18,23 @@ enum class TargetFormat(
     Dmg("dmg", OS.MacOS),
     Pkg("pkg", OS.MacOS),
     Exe("exe", OS.Windows),
-    Msi("msi", OS.Windows);
+    Msi("msi", OS.Windows),
+
+    /** A `.flatpak` bundle, with a manifest for Flathub. Built by `extended/gradle-plugin-kn`. */
+    Flatpak("flatpak", OS.Linux),
+
+    /** An unsigned `.msix` package, for sideloading or the Microsoft Store. Built by `extended/gradle-plugin-kn`. */
+    Msix("msix", OS.Windows);
 
     val isCompatibleWithCurrentOS: Boolean by lazy { isCompatibleWith(currentOS) }
 
     internal fun isCompatibleWith(os: OS): Boolean = os == targetOS
 
     val outputDirName: String
-        get() = if (this == AppImage) "app" else id
+        get() = when (this) {
+            AppImage -> "app"
+            else -> id
+        }
 
     val fileExt: String
         get() {

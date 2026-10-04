@@ -9,6 +9,8 @@ import com.oracle.svm.core.annotate.Substitute;
 import com.oracle.svm.core.annotate.TargetClass;
 import java.util.function.BooleanSupplier;
 import kotlin.coroutines.CoroutineContext;
+import kotlinx.coroutines.CancellableContinuation;
+import kotlinx.coroutines.DisposableHandle;
 
 /**
  * Cuts the places where a library Compose draws with reaches AWT by a call that never runs
@@ -65,5 +67,18 @@ final class Target_org_jetbrains_skiko_SwingDispatcher {
     public void dispatch(CoroutineContext context, Runnable block) {
         throw new IllegalStateException(
             "This image has no AWT event queue to run on. Give the scene a coroutine dispatcher of the window layer.");
+    }
+
+    /** The delay and timeout paths build a javax.swing.Timer. */
+    @Substitute
+    public void scheduleResumeAfterDelay(long timeMillis, CancellableContinuation<?> continuation) {
+        throw new IllegalStateException(
+            "This image has no Swing timer to delay on. Give the scene a coroutine dispatcher of the window layer.");
+    }
+
+    @Substitute
+    public DisposableHandle invokeOnTimeout(long timeMillis, Runnable block, CoroutineContext context) {
+        throw new IllegalStateException(
+            "This image has no Swing timer to time out on. Give the scene a coroutine dispatcher of the window layer.");
     }
 }

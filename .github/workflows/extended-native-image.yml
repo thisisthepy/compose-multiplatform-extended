@@ -21,7 +21,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: 3eda7df754cd743d87f65b64e8e90f608bc3bd3b
+  CORE_EXTENDED_REF: 87f67ef9a3c5eff81da9f0999a71addfa6ac7295
   PLUGIN_VERSION: 1.11.1-extended-dev
   COMPOSE_VERSION: 1.11.1
   NIK_BASE: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2
@@ -54,22 +54,6 @@ jobs:
             echo "hello-awtfree does not exist yet: checking the window sources only"
             bash extended/native-image/check-native-config.sh core-extended
           fi
-
-  # Temporary: why GraalVM runs main on a thread that is not the first one. Dispatch only.
-  diag-main-thread:
-    name: diag main thread (temporary)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-26
-    timeout-minutes: 20
-    steps:
-      - name: NIK and its launcher class
-        shell: bash
-        run: |
-          curl -fsSL -o nik.tar.gz "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64.tar.gz"
-          mkdir nik && tar xzf nik.tar.gz -C nik
-          jar=$(find nik -name svm.jar | head -1); echo "$jar"
-          javap -p -c -cp "$jar" com.oracle.svm.core.JavaMainWrapper | grep -n -i "thread\|RunMainInNewThread\|Darwin\|invoke.*run\|static.*(" | head -80
-          unzip -l "$jar" | grep -i "JavaMainWrapper\|MainThread" | head
 
   plugin-dsl:
     name: Plugin DSL additive
@@ -248,13 +232,6 @@ jobs:
           CORE_EXTENDED: ${{ github.workspace }}/core-extended
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
-
-      - name: Which native-image options name the main thread
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          "$GRAALVM_HOME/bin/native-image" --expert-options-all 2>&1 | grep -i -B1 -A3 "NewThread\|FirstThread\|MainThread" || echo "none"
-          grep -n "RunMainInNewThread" extended/native-image/hello-awtfree-link/build/tmp/packageNativeImage/native-image.args || echo "not in the argument file"
 
       - name: Start the AwtFree link sample
         working-directory: extended/native-image/hello-awtfree-link

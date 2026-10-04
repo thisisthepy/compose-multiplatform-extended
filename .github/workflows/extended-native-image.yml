@@ -21,14 +21,16 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: 7f08736385177d85deebf72888cdef0855cf744c
+  CORE_EXTENDED_REF: 431383c3ae5b5546f9e00281cc265c1cf873c738
   PLUGIN_VERSION: 1.11.1-extended-dev
   COMPOSE_VERSION: 1.11.1
   NIK_BASE: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2
 
 jobs:
+  # compose-rust and pythonx constraints, kept apart from the standalone samples: the upcall
+  # table and the absence of runtime reflection matter to them, not to an ordinary Kotlin app.
   config-check:
-    name: Window config check
+    name: "compose-rust/pythonx: window upcall table and no reflection"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -64,6 +66,50 @@ jobs:
           filter: blob:none
       - name: Upstream DSL gains declarations and loses none
         run: bash extended/native-image/check-plugin-dsl-additive.sh origin/jb-main
+
+  # The plain JVM way to ship, built and started standalone. Independent of the native-image
+  # cells below, so a JVM regression is not hidden behind a native-image one.
+  jvm:
+    name: JVM hello (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-26 }
+          - { name: linux-x64, os: ubuntu-24.04 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xvfb xauth libgl1-mesa-dri libxtst6 libxrender1 libxi6 fonts-noto-cjk binutils fakeroot
+      - name: Plugin to mavenLocal
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+      - name: createDistributable
+        working-directory: extended/samples/hello-jvm
+        run: ./gradlew --no-daemon createDistributable
+      - name: Start the packaged app
+        working-directory: extended/samples/hello-jvm
+        shell: bash
+        run: |
+          set -euo pipefail
+          launcher=$(find build/compose/binaries -type f -path '*bin/hello-jvm' -o -type f -path '*MacOS/hello-jvm' | head -1)
+          echo "launcher: $launcher"
+          png="$RUNNER_TEMP/jvm-self-check.png"
+          if [ "$RUNNER_OS" = Linux ]; then
+            HELLO_SELF_CHECK="$png" xvfb-run -a timeout 120 "$launcher"
+          else
+            HELLO_SELF_CHECK="$png" timeout 120 "$launcher"
+          fi
+          test -s "$png"
 
   package:
     name: Package (${{ matrix.name }})
@@ -118,7 +164,7 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-${{ matrix.nik }}.tar.gz"
           mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
-          ni="$(find "$RUNNER_TEMP/nik" -path '*/bin/native-image' -type f | head -1)"
+          ni="$(find "$RUNNER_TEMP/nik" -path '*/bin/native-image' -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
           home="$(dirname "$(dirname "$ni")")"
           echo "GRAALVM_HOME=$home" >> "$GITHUB_ENV"
           "$home/bin/native-image" --version
@@ -166,18 +212,16 @@ jobs:
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          # The module lists are core-extended's own extended-window-publish matrix.
           if [ "$RUNNER_OS" = macOS ]; then
-            sets="common native/macos|common graalvm/macos"
+            modules="common native/macos graalvm/graalvm-macos graalvm/graalvm-linux"
           else
-            sets="common graalvm/linux"
+            modules="common graalvm/graalvm-macos graalvm/graalvm-linux"
           fi
           cp project.yaml project.yaml.all
-          IFS='|' read -ra list <<< "$sets"
-          for set in "${list[@]}"; do
-            printf 'modules:\n' > project.yaml
-            for m in $set; do printf '  - %s\n' "$m" >> project.yaml; done
-            ./kotlin publish mavenLocal
-          done
+          printf 'modules:\n' > project.yaml
+          for m in $modules; do printf '  - %s\n' "$m" >> project.yaml; done
+          ./kotlin publish mavenLocal
           cp project.yaml.all project.yaml
           find ~/.m2/repository/org/thisisthepy/compose/window -name '*.pom' | sort
 
@@ -204,7 +248,7 @@ jobs:
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
-      - name: Config check on the generated metadata
+      - name: "compose-rust/pythonx: config check on the generated metadata"
         shell: bash
         run: |
           if [ "${{ steps.sample.outputs.awtfree }}" = true ]; then

@@ -22,7 +22,7 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
-import org.jetbrains.compose.desktop.application.dsl.NativeImageWindowing
+import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentArch
@@ -80,7 +80,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     abstract val skikoStaticDirectory: DirectoryProperty
 
     @get:Input
-    abstract val windowing: Property<NativeImageWindowing>
+    abstract val windowing: Property<ApplicationWindowing>
 
     /** A compose-multiplatform-core-extended checkout, the source of the window layers' C code. */
     @get:InputDirectory
@@ -119,7 +119,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             throw GradleException("$nativeImage does not exist. graalvmHome has to name a GraalVM with native-image.")
         }
         val staticJdk = graalvm.resolve(platform.staticJdkDirectory)
-        val awt = windowing.get() == NativeImageWindowing.Awt
+        val awt = windowing.get() == ApplicationWindowing.Awt
         for (archive in if (awt) platform.staticJdkArchives else emptyList()) {
             if (!staticJdk.resolve(archive).isFile) {
                 throw GradleException(

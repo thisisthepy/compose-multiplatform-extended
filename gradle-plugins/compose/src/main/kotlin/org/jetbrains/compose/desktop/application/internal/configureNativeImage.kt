@@ -22,6 +22,19 @@ internal fun JvmApplicationContext.configureNativeImage() {
     val graalvmHome = settings.graalvmHome.orElse(project.providers.environmentVariable("GRAALVM_HOME"))
     val metadataDirectory = settings.metadataDirectory.convention(project.layout.projectDirectory.dir("src/main/native-image"))
 
+    // The one entry point for whichever output the application chose; the metadata they share
+    // comes from nativeDistributions.
+    project.tasks.register("packageApplication") { task ->
+        task.group = "compose desktop"
+        task.description = "Packages the application as the output the application block names."
+        task.dependsOn(app.output.map { output ->
+            if (project.tasks.findByName(output.packageTask) == null) {
+                throw GradleException("output = $output needs the task ${output.packageTask}, which this build does not define.")
+            }
+            output.packageTask
+        })
+    }
+
     tasks.register<AbstractNativeImageTask>(taskNameAction = "package", taskNameObject = "nativeImage") {
         description = "Builds the application as one GraalVM native image executable."
         useAppRuntimeFiles { (runtimeJars, _) -> runtimeClasspath.from(runtimeJars) }
@@ -30,7 +43,7 @@ internal fun JvmApplicationContext.configureNativeImage() {
         imageName.set(settings.imageName.orElse(packageNameProvider))
         this.metadataDirectory.set(metadataDirectory.map { if (it.asFile.isDirectory) it else null })
         skikoStaticDirectory.set(settings.skikoStaticDirectory)
-        windowing.set(settings.windowing)
+        windowing.set(app.windowing)
         windowSourcesDirectory.set(settings.windowSourcesDirectory)
         buildArgs.set(settings.buildArgs)
         windowsManifest.set(settings.windowsManifest)

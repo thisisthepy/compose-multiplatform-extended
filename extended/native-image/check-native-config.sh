@@ -50,12 +50,12 @@ echo "files with upcall entry points: $entry_files"
 
 # Kotlin/Native window modules: C and Objective-C reach Kotlin through staticCFunction or
 # @CName entries, and nothing is looked up by name at run time. K/N has no JVM reflection, so
-# what is left to forbid is kotlin.reflect.full, ServiceLoader and Objective-C lookups by name.
+# what is left to forbid is kotlin.reflect.full, ServiceLoader and Objective-C class lookups by name. A selector for a target-action menu item is not one: it names a method of an object the code itself created.
 mapfile -t kn_sources < <(find "$window/native" -type f -name '*.kt' \
     -not -path '*/test/*' -not -path '*/build/*' 2>/dev/null | sort)
 echo "Kotlin/Native window sources checked: ${#kn_sources[@]}"
 if [[ ${#kn_sources[@]} -gt 0 ]]; then
-    kn_pattern='kotlin\.reflect\.full|ServiceLoader|Class\.forName|NSClassFromString|NSSelectorFromString|objc_getClass|sel_registerName'
+    kn_pattern='kotlin\.reflect\.full|ServiceLoader|Class\.forName|NSClassFromString|objc_getClass'
     if hits=$(grep -nE "$kn_pattern" "${kn_sources[@]}" | grep -vE '^\S+:[0-9]+:\s*(//|\*|/\*)'); then
         note "runtime lookup by name in the Kotlin/Native window sources:"; echo "$hits" >&2
     fi

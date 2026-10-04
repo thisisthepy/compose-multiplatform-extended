@@ -8,8 +8,11 @@ package org.jetbrains.compose.desktop.application.internal
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
+import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
+import org.jetbrains.compose.desktop.application.dsl.ApplicationOutput
+import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
 import org.jetbrains.compose.desktop.application.dsl.JvmApplicationDistributions
 import org.jetbrains.compose.desktop.application.dsl.JvmApplicationBuildTypes
 import org.jetbrains.compose.desktop.application.dsl.NativeImageSettings
@@ -40,4 +43,8 @@ internal open class JvmApplicationData @Inject constructor(
     val nativeDistributions: JvmApplicationDistributions = objects.new()
     val buildTypes: JvmApplicationBuildTypes = objects.new()
     val nativeImage: NativeImageSettings = objects.new()
+    val output: Property<ApplicationOutput> = objects.property(ApplicationOutput::class.java).convention(ApplicationOutput.Jvm)
+    val windowing: Property<ApplicationWindowing> = objects.property(ApplicationWindowing::class.java).convention(
+        output.map { if (it == ApplicationOutput.Jvm) ApplicationWindowing.Awt else ApplicationWindowing.AwtFree }
+    )
 }

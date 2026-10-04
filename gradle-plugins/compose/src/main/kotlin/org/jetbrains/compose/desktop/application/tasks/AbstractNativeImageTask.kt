@@ -5,6 +5,7 @@
 
 package org.jetbrains.compose.desktop.application.tasks
 
+import org.jetbrains.compose.desktop.application.extended.WindowsAppManifest
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -22,6 +23,7 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
+import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentArch
@@ -79,6 +81,15 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     abstract val skikoStaticDirectory: DirectoryProperty
 
     @get:Input
+    abstract val windowing: Property<ApplicationWindowing>
+
+    /** A compose-multiplatform-core-extended checkout, the source of the window layers' C code. */
+    @get:InputDirectory
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val windowSourcesDirectory: DirectoryProperty
+
+    @get:Input
     abstract val buildArgs: ListProperty<String>
 
     /** Windows only: an application manifest to embed instead of the plugin's own. */
@@ -109,7 +120,8 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             throw GradleException("$nativeImage does not exist. graalvmHome has to name a GraalVM with native-image.")
         }
         val staticJdk = graalvm.resolve(platform.staticJdkDirectory)
-        for (archive in platform.staticJdkArchives) {
+        val awt = windowing.get() == ApplicationWindowing.Awt
+        for (archive in if (awt) platform.staticJdkArchives else emptyList()) {
             if (!staticJdk.resolve(archive).isFile) {
                 throw GradleException(
                     "$graalvm has no ${staticJdk.resolve(archive)}. A single executable links AWT statically, " +
@@ -129,6 +141,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
         workDir.deleteRecursively()
         workDir.mkdirs()
+        if (!awt) checkSkikoNeedsNoJawt(skikoArchive)
         val supportJar = buildSupportJar(graalvm)
 
         val output = destinationDir.get().asFile
@@ -137,9 +150,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
         val classpath = (runtimeClasspath.files + supportJar).joinToString(File.pathSeparator)
         val (linked, link) = when (platform) {
-            Platform.MacosArm64 -> macosLink(graalvm, staticJdk, skikoArchive, skiaArchives)
-            Platform.WindowsX64 -> windowsLink(graalvm, staticJdk, skikoArchive, skiaArchives)
-            Platform.LinuxX64 -> linuxLink(graalvm, staticJdk, skikoArchive, skiaArchives)
+            Platform.MacosArm64 -> macosLink(graalvm, staticJdk, skikoArchive, skiaArchives, awt)
+            Platform.WindowsX64 -> windowsLink(graalvm, staticJdk, skikoArchive, skiaArchives, awt)
+            Platform.LinuxX64 -> linuxLink(graalvm, staticJdk, skikoArchive, skiaArchives, awt)
         }
 
         val args = mutableListOf(
@@ -165,17 +178,18 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")
     }
 
-    private fun macosLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+    private fun macosLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>, awt: Boolean): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
-        val linked = listOf(
+        val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
+        val linked = if (awt) listOf(
             "awt_lwawt:sun_lwawt|sun_java2d_metal|sun_java2d_opengl|sun_font|sun_awt",
             "osxui:com_apple_laf",
-            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
-        )
+            skikoLibrary,
+        ) else listOf(skikoLibrary)
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
-        for (archive in Platform.MacosArm64.staticJdkArchives) {
+        for (archive in if (awt) Platform.MacosArm64.staticJdkArchives else emptyList()) {
             linker("-Wl,-force_load,${staticJdk.resolve(archive)}")
         }
         linker("-Wl,-force_load,$skikoArchive")
@@ -185,7 +199,13 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (framework in listOf("Metal", "MetalKit", "IOKit")) {
             linker("-framework", framework)
         }
-        for (library in listOf("awt_lwawt", "osxui", "skiko")) {
+        if (!awt) {
+            windowLayerObjects("appkit_window.m", "appkit_resize.h").forEach { linker(it.absolutePath) }
+            for (framework in listOf("AppKit", "Carbon", "QuartzCore")) {
+                linker("-framework", framework)
+            }
+        }
+        for (library in if (awt) listOf("awt_lwawt", "osxui", "skiko") else listOf("skiko")) {
             linker("-Wl,-exported_symbol,_JNI_OnLoad_$library")
         }
         return linked to link
@@ -203,33 +223,35 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * (the `java` and `jvm` shims, `awt_headless`, `freetype`); the executable needs none of
      * them, and [removeUnneededLinuxLibraries] takes them away.
      */
-    private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+    private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>, awt: Boolean): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         // sun.font declares a Windows-only native, and the prefix that makes sun.font built in
         // makes the image refer to it.
         val stubs = compileC(graalvm, foreignStubs(skikoArchive, listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows")), "foreign_stubs")
-        val linked = listOf(
+        val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
+        val linked = if (awt) listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
             "awt_xawt",
             "fontmanager:sun_font",
             "javajpeg:com_sun_imageio_plugins_jpeg|sun_awt_image_jpeg",
             "lcms:sun_java2d_cmm_lcms",
             "mlib_image:sun_awt_image_ImagingLib",
-            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
-        )
+            skikoLibrary,
+        ) else listOf(skikoLibrary)
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
         linker("-Wl,--whole-archive", skikoArchive.absolutePath, "-Wl,--no-whole-archive")
         // Skia's archives refer to one another in both directions. FreeType comes after them,
         // so it fills only what neither AWT's font code nor Skia defines.
         linker("-Wl,--start-group")
-        linker(staticJdk.resolve("libjawt.a").absolutePath)
+        if (awt) linker(staticJdk.resolve("libjawt.a").absolutePath)
         skiaArchives.sortedBy { if (it.name == "libskia.a") 0 else 1 }.forEach { linker(it.absolutePath) }
-        for (archive in listOf("libawt_xawt.a", "libawt.a", "libfreetype.a")) {
+        for (archive in if (awt) listOf("libawt_xawt.a", "libawt.a", "libfreetype.a") else emptyList()) {
             linker(staticJdk.resolve(archive).absolutePath)
         }
         linker("-Wl,--end-group")
         linker(onLoad.absolutePath, stubs.absolutePath)
+        if (!awt) windowLayerObjects("x11_window.c").forEach { linker(it.absolutePath) }
         for (library in listOf("stdc++", "GL", "X11", "Xext", "Xi", "Xrender", "Xtst", "fontconfig", "dl", "m", "pthread")) {
             linker("-l$library")
         }
@@ -257,7 +279,11 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * VCRUNTIME140.dll or MSVCP140.dll. The JDK's objects call the C++ library through
      * `__imp_` pointers, and the linker binds those to the linked-in definitions.
      */
-    private fun windowsLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>): Pair<List<String>, List<String>> {
+    private fun windowsLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>, awt: Boolean): Pair<List<String>, List<String>> {
+        // TODO(windows window layer): compile win32_window.c and win32_dcomp.cpp from the core-extended
+        // windows-shared module with cl.exe (/MD) and link dcomp.lib, d3d11.lib, dxgi.lib, user32.lib
+        // and gdi32.lib. Until the Windows worker adds that, fail instead of producing a windowless image.
+        if (!awt) throw GradleException("AWT-free images are not built on Windows yet: the win32 window layer is not linked.")
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         val stubs = compileC(graalvm, foreignStubs(skikoArchive), "foreign_stubs")
         val relinked = workDir.resolve("relinked").apply { mkdirs() }
@@ -266,17 +292,18 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             copy.parentFile.mkdirs()
             copy.writeBytes(blankRuntimeDirectives(library.readBytes()))
         }
-        val linked = listOf(
+        val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
+        val linked = if (awt) listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
             "fontmanager:sun_font",
             "javajpeg:com_sun_imageio_plugins_jpeg|sun_awt_image_jpeg",
             "lcms:sun_java2d_cmm_lcms",
             "mlib_image:sun_awt_image_ImagingLib",
-            "skiko:org_jetbrains_skia|org_jetbrains_skiko",
-        )
+            skikoLibrary,
+        ) else listOf(skikoLibrary)
         val link = mutableListOf<String>()
         fun linker(vararg options: String) = options.forEach { link += "-H:NativeLinkerOption=$it" }
-        for (archive in Platform.WindowsX64.staticJdkArchives) {
+        for (archive in if (awt) Platform.WindowsX64.staticJdkArchives else emptyList()) {
             linker("/WHOLEARCHIVE:${rewritten(staticJdk.resolve(archive), into = "jdk")}")
         }
         linker("/WHOLEARCHIVE:${rewritten(skikoArchive)}")
@@ -299,9 +326,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         checkRuntimeHelpers(skiaArchives + skikoArchive, listOf(cxxRuntime, msvcLibrary("libvcruntime.lib")))
         // Without a manifest a process is DPI unaware, and Windows stretches its 96 DPI
         // drawing to a scaled display, which blurs the text. This is what java.exe declares.
-        val manifest = windowsManifest.orNull?.asFile
-            ?: workDir.resolve("windows-app.manifest")
-                .apply { writeText(resourceText("windows-app.manifest")) }
+        val manifest = WindowsAppManifest.resolve(windowsManifest.orNull?.asFile, workDir)
         linker("/MANIFEST:EMBED", "/MANIFESTINPUT:${manifest.absolutePath}")
         // No opengl32.lib: skiko defines the few OpenGL entry points it calls itself and
         // resolves them from opengl32.dll at run time, so the import library defines them twice.
@@ -415,6 +440,40 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         return jar
     }
 
+    /**
+     * Compiles the core-extended window layer's C or Objective-C source for this platform and
+     * returns its object files. The window Kotlin wrappers call these functions through
+     * `@CFunction`, which GraalVM resolves by name at link time, so linking the objects is the
+     * whole registration. The source is found by file name under `extended/window` in the
+     * checkout named by [windowSourcesDirectory], and the directory holding it is on the
+     * include path so its headers (`appkit_resize.h`) are found.
+     */
+    private fun windowLayerObjects(source: String, vararg headers: String): List<File> {
+        val checkout = windowSourcesDirectory.orNull?.asFile ?: throw GradleException(
+            "nativeImage.windowSourcesDirectory is not set. An AWT-free image links the window layer's C sources, " +
+                "which come from a compose-multiplatform-core-extended checkout."
+        )
+        val root = checkout.resolve("extended/window")
+        val file = findWindowSource(root, source)
+            ?: throw GradleException("$source was not found under $root. windowSourcesDirectory has to be a core-extended checkout that has the window modules.")
+        for (header in headers) {
+            if (!file.resolveSibling(header).isFile && findWindowSource(root, header) == null) {
+                throw GradleException("$header was not found under $root, and $source includes it.")
+            }
+        }
+        val includes = (listOf(file.parentFile) + headers.mapNotNull { h -> findWindowSource(root, h)?.parentFile })
+            .distinct().map { "-I${it.absolutePath}" }
+        val name = file.nameWithoutExtension
+        val obj = workDir.resolve("window_$name.o")
+        val command = when (currentOS) {
+            OS.MacOS -> listOf("cc", "-c", "-O2", "-fobjc-arc", "-arch", "arm64") + includes + listOf(file.absolutePath, "-o", obj.absolutePath)
+            OS.Linux -> listOf("cc", "-c", "-O2", "-fPIC") + includes + listOf(file.absolutePath, "-o", obj.absolutePath)
+            else -> throw GradleException("The window layer is not compiled on $currentOS.")
+        }
+        run(command, workDir.resolve("window_$name.log"))
+        return listOf(obj)
+    }
+
     private fun compileC(graalvm: File, source: String, name: String): File {
         val file = workDir.resolve("$name.c").apply { writeText(source) }
         return if (currentOS == OS.Windows) {
@@ -442,6 +501,26 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
                 workDir.resolve("$name.log"),
             )
             obj
+        }
+    }
+
+    /**
+     * An AWT-free image has no JAWT to link, so a skiko archive that still calls `JAWT_GetAWT`
+     * fails the link on a symbol that says nothing about the cause. Say it before the build.
+     */
+    private fun checkSkikoNeedsNoJawt(skikoArchive: File) {
+        val listing = workDir.resolve("${skikoArchive.name}-undefined-jawt.txt")
+        if (currentOS == OS.Windows) {
+            run(listOf("dumpbin.exe", "/nologo", "/symbols", skikoArchive.absolutePath), listing, quiet = true)
+        } else {
+            run(listOf("nm", "-u", skikoArchive.absolutePath), listing, quiet = true)
+        }
+        if (listing.useLines { lines -> lines.any { "JAWT_GetAWT" in it && (currentOS != OS.Windows || "UNDEF" in it) } }) {
+            throw GradleException(
+                "$skikoArchive was built for an AWT window: it refers to JAWT_GetAWT, which an AWT-free application does not have. " +
+                    "Build the archive with `build-skiko-static-jvm.sh --no-jawt <work-dir>` from compose-multiplatform-core-extended, " +
+                    "or set windowing = ApplicationWindowing.Awt to keep AWT."
+            )
         }
     }
 
@@ -559,6 +638,10 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             }
 
         /** The JNI short name mangling: '/' is '_', and '_', ';', '[' and non-ASCII are escaped. */
+        /** The file called [name] anywhere under [root], or null. */
+        fun findWindowSource(root: File, name: String): File? =
+            root.takeIf { it.isDirectory }?.walkTopDown()?.firstOrNull { it.isFile && it.name == name }
+
         fun jniMangle(name: String): String = buildString {
             for (char in name) {
                 when {

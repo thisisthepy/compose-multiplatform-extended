@@ -29,6 +29,9 @@ compose.desktop.application {
         // CORE_EXTENDED: a checkout of compose-multiplatform-core-extended; SKIKO_STATIC: the
         // build-skiko-static-jvm.sh --no-jawt output.
         providers.environmentVariable("CORE_EXTENDED").orNull?.let { windowSourcesDirectory.set(file(it)) }
+        // AppKit calls have to come from the process's first thread; GraalVM's launcher runs
+        // main on a new one on macOS unless told not to.
+        if (macos) buildArgs.add("-H:-RunMainInNewThread")
         providers.environmentVariable("SKIKO_STATIC").orNull?.let { skikoStaticDirectory.set(file(it)) }
     }
 }

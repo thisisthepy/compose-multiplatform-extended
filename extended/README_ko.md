@@ -1,25 +1,111 @@
 # compose-multiplatform-extended
 
-Compose Gradle 플러그인의 저장소인
-[JetBrains/compose-multiplatform](https://github.com/JetBrains/compose-multiplatform) 을 thisisthepy
-가 포크한 저장소입니다. 작업은 `extended` 브랜치에 있습니다. 저장소 루트는 업스트림 그대로 둡니다.
-포크가 더한 것은 `gradle-plugins/` 아래의 플러그인에 있거나 `extended/` 아래에 있습니다.
+Compose Gradle 플러그인을 확장해, 같은 `compose.desktop` 설정으로 데스크톱 애플리케이션을 JVM 앱, GraalVM native-image 실행 파일 하나, Kotlin/Native 실행 파일 하나 중 어느 쪽으로든 내보냅니다.
 
 English: [README.md](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/README.md)
 
-## 더한 것
+Compose Gradle 플러그인의 저장소인
+[JetBrains/compose-multiplatform](https://github.com/JetBrains/compose-multiplatform) 을 thisisthepy
+가 포크한 저장소입니다. 작업은 `extended` 브랜치에 있습니다. 저장소 루트는 업스트림 그대로 둡니다.
+포크가 더한 것은 `gradle-plugins/` 아래의 플러그인에 있거나 `extended/` 아래에 있습니다. Compose 라이브러리의 포크인
+[compose-multiplatform-core-extended](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README_ko.md)
+와 짝을 이룹니다.
 
-| 항목 | 상태 | 위치 |
-|---|---|---|
-| `packageNativeImage`: Compose 데스크톱 애플리케이션을 GraalVM native-image 실행 파일 하나로 (macOS arm64, Linux x64, Windows x64) | 구현 | [`extended/native-image`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/native-image/README.md) |
-| `runNativeImageAgent`: 이미지를 빌드할 때 쓰는 reachability 메타데이터 | 구현 | 같은 곳 |
-| Windows: DPI 를 인식하는 실행 파일, 링크 전에 오래된 MSVC 툴셋을 잡는 검사 | 계획 | [#8](https://github.com/thisisthepy/compose-multiplatform-extended/pull/8) |
-| 실제 화면에서의 Windows 실행 (probe 는 화면 밖에 렌더링합니다) | 계획 | [`extended/native-image`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/native-image/README.md#not-yet) |
-| 플러그인 ID `org.thisisthepy.compose` | 계획 | 브랜치 [`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates) |
+## 기능
 
-함께 쓰는 Compose 라이브러리와 이미지가 링크하는 정적 skiko 아카이브는
-[thisisthepy/compose-multiplatform-core-extended](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README_ko.md)
-에서 옵니다.
+- 애플리케이션 하나, 출력 셋: `output = ApplicationOutput.Jvm`, `NativeImage`, `KotlinNative`. 이름, 버전, 제작사, 아이콘, 리소스는 `nativeDistributions` 에 한 번만 적습니다.
+- `packageNativeImage`: 애플리케이션을 GraalVM native-image 실행 파일 하나로 만듭니다. 옆에 Java 런타임이 없습니다 (macOS arm64, Linux x64, Windows x64).
+- `runNativeImageAgent`: 이미지를 빌드할 때 쓰는 reachability 메타데이터를 기록합니다.
+- AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다.
+- macOS, Linux, Windows 용 Kotlin/Native 데스크톱 패키징. 업스트림의 `TargetFormat` 이름을 그대로 씁니다. `.app` 과 `.dmg`(스토어용은 `.pkg`), `.AppImage` 와 `.deb`, `.rpm`, `.exe`. macOS 에서는 서명, 공증, 유니버설 바이너리를 지원합니다. 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
+- 모든 출력의 실행 태스크, 그리고 배율이 적용된 화면에서 DPI 를 인식하는 Windows 애플리케이션.
+- 업스트림의 `compose` DSL 과 공개 API 는 그대로입니다. 기존 Compose 프로젝트가 그대로 동작하고, 새 설정은 추가만 합니다.
+
+## 왜 쓰는가
+
+업스트림의 `compose.desktop` 은 Java 런타임을 옆에 담아 애플리케이션을 내보냅니다. 내려받는 크기가 더 크고,
+런타임도 계속 갱신해야 합니다. 이 포크에서는 같은 프로젝트로 네이티브 실행 파일 하나도 만들 수 있고,
+AWT 없이 만들기 때문에 애플리케이션이 쓰지 않는 것은 실행 파일에 들어가지 않습니다.
+
+## 설치
+
+아직 공개 저장소에 없습니다. 플러그인을 로컬 Maven 저장소에 게시하고, `mavenLocal()` 을 Gradle Plugin Portal 보다 앞에 둡니다.
+
+```sh
+cd gradle-plugins
+./gradlew --no-daemon :compose:publishToMavenLocal \
+    -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+```
+
+`settings.gradle.kts` 와 `build.gradle.kts` 는 영어 README 의 Install 절과 같습니다. 플러그인은 당분간
+JetBrains 의 ID 를 그대로 씁니다. `org.thisisthepy.compose` 로 바꾸는 일은 계획입니다.
+
+## 출하하는 세 가지 방법
+
+| 출력 | 결과 | 태스크 | 자세히 |
+|---|---|---|---|
+| JVM | Java 런타임을 옆에 둔 애플리케이션 (dmg, deb, msi 등) | `packageDistributionForCurrentOS` | 업스트림 그대로 |
+| GraalVM native image | 런타임 없는 실행 파일 하나 | `packageNativeImage` | 아래 "실행 파일 하나" |
+| Kotlin/Native | 타깃마다 실행 파일 하나를 같은 `TargetFormat` 으로 패키징(아래 표), 명령줄 프로그램은 패키징 없는 `.kexe`/`.exe` | `packageKotlinNative` |
+
+`packageApplication` 은 `output` 설정이 가리키는 출력을 실행합니다.
+
+### 플러그인 둘
+
+- **Compose 데스크톱**, `org.thisisthepy.compose`: Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다. 창이 있는 Kotlin/Native 앱은 패키징합니다.
+- **명령줄 프로그램용 Kotlin/Native 데스크톱**, `org.thisisthepy.kotlin.native.desktop`: Compose 도 창도 없습니다. ID 는 Kotlin 빌드 도구의 이름 규칙을 따릅니다
+  (`org.jetbrains.kotlin.native.cocoapods` 는 `org.thisisthepy.kotlin.native.<feature>` 에 대응합니다). 소유자, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
+
+Kotlin/Native 앱 종류별 출력입니다. 소유자, 2026-10-05:
+
+> [user] "업스트림이 지원하는게 저렇게 다양하면 업스트림쪽에서 확장하는게 맞긴 하지. Mac: 앱은 .app 패키지는 .dmg 스토어 패키지는 .pkg / 리눅스: 앱 .appimage 패키지는 .deb/.rpm 스토어 패키지는 .flatpack / 윈도우: 앱 .exe 패키지는 .msi/.exe(설치) 스토어 패키지는 .msix / 이렇게 가자. 그럼 업스트림 기능 확장 정도이겠네."
+
+| OS | 앱 | 패키지 | 스토어 패키지 |
+|---|---|---|---|
+| macOS | `.app` | `.dmg` | `.pkg` |
+| Linux | `.AppImage` | `.deb`, `.rpm` | Flatpak |
+| Windows | `.exe` | `.msi`, `.exe`(설치) | `.msix` |
+
+Compose 플러그인은 업스트림의 `nativeDistributions` 를 확장합니다. JVM 출력에서 이미 동작하는 `TargetFormat`(`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`)이 Kotlin/Native 창 앱에서도 동작하고, 업스트림에 없는 형식(진짜 `.AppImage` 파일, Flatpak, MSIX)은 같은 방식으로 더합니다.
+
+직접 배포 형식은 모든 OS 에서 Velopack 이 만듭니다. Windows 의 `Setup.exe` 와 `.msi`, macOS 의 `.dmg`(Velopack 은 dmg 를 만들지 못하므로 Velopack 의 portable zip 안의 `.app` 으로 만듭니다), Linux 의 `.AppImage` 입니다. 소유자, 2026-10-05:
+
+> [user] "윈도우는 Velopack으로 하자. NSIS랑 wix는 너무 별로야."
+
+플러그인은 패키지와 업데이트 피드 산출물(전체·델타 패키지와 `releases.<channel>.json`)을 만듭니다. 설치된 앱을 업데이트하는 일은 플러그인의 몫이 아닙니다. 앱 개발자는 Velopack SDK 를 직접 씁니다. 소유자, 2026-10-05:
+
+> [user] "업데이트 sdk 때문에 그런거면 그건 우리가 커버쳐줄 부분은 아닌거같아."
+
+`.pkg`(Velopack 이 만드는 일반 `.pkg` 와 따로 만드는 Mac App Store 형식), `.deb`, `.rpm` 은 플러그인의 태스크가 만듭니다. Flatpak 과 `.msix` 는 따로 만듭니다. 각각의 상태는 [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) 에 있습니다.
+
+서명. `.dmg`, `.msi`, 설치용 `.exe` 는 서명 없이 설치되며 기본 배포 경로입니다. `.pkg` 와 `.msix` 는 스토어 형식으로, 스토어 제출(스토어가 다시 서명)이나 인증서가 있을 때를 위한 것입니다.
+
+명령줄 프로그램은 다음과 같습니다.
+
+> [user] "Cli 플러그인에는 확장자 .kexe랑 .exe가 맞지. .kexe에 서명하면 되고. .app이랑 .appimage는 gui 앱일때 하는게 맞는거같고 .msi 패키지는 너무 갔어"
+
+명령줄 프로그램은 패키징하지 않습니다. 실행 파일이 곧 출력입니다. macOS 의 `.kexe` 는 기본으로 ad hoc 서명하고(링커의 서명을 유지하며, 링크 뒤에 파일을 고치면 다시 서명합니다), 인증서를 설정하면 Developer ID 로 서명합니다. 단독 파일에는 공증 티켓을 붙일 수 없으므로 공증은 zip 을 제출하는 선택 태스크입니다. JVM 출력은 업스트림의 `nativeDistributions` 형식을 그대로 씁니다.
+
+### Windows 는 MSVC Build Tools 가 필요하다
+
+모든 `mingwX64` 타깃은 최종 MSVC 실행 파일로 나갑니다. Kotlin/Native 는 MinGW 오브젝트를 만들고, 이를
+MSVC 링커가 받아들이도록 고쳐 씁니다. 그다음 MSVC 링커가 Skia 와 창 C 계층(둘 다 MSVC 빌드)과 함께
+링크합니다. MinGW 만 쓰는 경로는 없습니다. 소유자가 2026-10-05 에 정한 일입니다.
+
+> [user] "Msvc 있어야 하는게 뭐 어때서? 나는 물어보는거잖아. Mingw 우회 구현을 넣지 마. Extended는 Mingw 타겟도 전부 최종 msvc 앱으로 나가도록 하면 되는거지 그냥."
+
+MSVC 툴셋 v14.51 이상, `clang-cl`, Windows SDK 가 있는 Visual Studio Build Tools 를 설치합니다. 빌드는 시작할 때
+이들을 찾고, 하나라도 없으면 설치 방법을 알려 주며 멈춥니다.
+
+### macOS 서명과 공증
+
+Kotlin/Native `.app` 은 `signDistributableNative...` 가 서명합니다. `nativeDistributions.macOS.signing { identity = "..." }`
+를 정하면 Developer ID 로, 아니면 ad hoc 으로 서명합니다(빌드한 기계에서 실행하기에는 충분합니다).
+`notarizeDmgNative...` 는 `macOS.notarization { appleID, password, teamID }` 로 dmg 를 제출하고 티켓을
+붙입니다. 자격 증명이 없으면 "Skipping notarization" 을 출력하고 성공하므로, Apple 자격 증명이 없는 CI 도 통과합니다.
+태스크 전체와 Linux, Windows 선행 조건은
+[`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md)
+에 있습니다.
 
 ## 실행 파일 하나: packageNativeImage
 

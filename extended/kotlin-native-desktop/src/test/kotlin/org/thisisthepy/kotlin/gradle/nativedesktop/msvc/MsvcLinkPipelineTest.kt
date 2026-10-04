@@ -3,7 +3,7 @@
  * Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE.txt file.
  */
 
-package org.jetbrains.compose.desktop.application.extended.msvc
+package org.thisisthepy.kotlin.gradle.nativedesktop.msvc
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -193,5 +193,17 @@ class MsvcLinkPipelineTest {
         assertTrue(MsvcEntryCode.kotlinSource("hello.main", false).contains("hello.main()"))
         assertTrue(MsvcEntryCode.kotlinSource("hello.main", true).contains("hello.main(Array(argc)"))
         assertTrue(MsvcEntryCode.kotlinSource("main", false).contains("@CName(\"kotlin_msvc_entry\")"))
+        assertTrue(MsvcEntryCode.kotlinSource("main", false, "entry_two").contains("fun entry_two("))
+    }
+
+    @Test
+    fun `main with a command line is told from main without one`() {
+        val with = "package hello\n\nfun main(args: Array<String>) {\n}\n"
+        val without = "package hello\n\nfun main() {\n}\n"
+        assertTrue(MainSignature.takesArguments("hello.main", listOf(with)))
+        assertEquals(false, MainSignature.takesArguments("hello.main", listOf(without)))
+        assertEquals(false, MainSignature.takesArguments("hello.main", listOf("package other\n\nfun main(args: Array<String>) {}")))
+        assertTrue(MainSignature.takesArguments("main", listOf("fun main(args : Array<String>) {}")))
+        assertEquals(false, MainSignature.takesArguments("hello.main", emptyList()))
     }
 }

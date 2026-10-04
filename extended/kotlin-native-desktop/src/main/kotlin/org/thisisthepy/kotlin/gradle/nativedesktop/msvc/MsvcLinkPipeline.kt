@@ -3,7 +3,7 @@
  * Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE.txt file.
  */
 
-package org.jetbrains.compose.desktop.application.extended.msvc
+package org.thisisthepy.kotlin.gradle.nativedesktop.msvc
 
 import java.io.File
 
@@ -274,10 +274,31 @@ object MsvcEntryCode {
             |import kotlinx.cinterop.toKString
             |
             |@CName("$symbol")
-            |fun kotlinMsvcEntry(argc: Int, argv: CPointer<CPointerVar<ByteVar>>?): Int {
+            |fun $symbol(argc: Int, argv: CPointer<CPointerVar<ByteVar>>?): Int {
             |    $call
             |    return 0
             |}
             |""".trimMargin()
+    }
+}
+
+/** Whether the program's `main` takes the command line, read from its source text. */
+object MainSignature {
+    /**
+     * [entryPoint] is `pkg.name` or `name`. A function of that name whose parameter list holds
+     * `Array<String>` takes arguments. Anything else, including a source that cannot be found,
+     * does not, which is also what Kotlin's own `main()` is.
+     */
+    fun takesArguments(entryPoint: String, sources: List<String>): Boolean {
+        val function = entryPoint.substringAfterLast('.')
+        val pkg = entryPoint.substringBeforeLast('.', "")
+        val declaration = Regex("""\bfun\s+${Regex.escape(function)}\s*\(([^)]*)\)""")
+        for (text in sources) {
+            val filePackage = Regex("""(?m)^\s*package\s+([\w.]+)""").find(text)?.groupValues?.get(1) ?: ""
+            if (filePackage != pkg) continue
+            val match = declaration.find(text) ?: continue
+            return match.groupValues[1].replace(" ", "").contains("Array<String>")
+        }
+        return false
     }
 }

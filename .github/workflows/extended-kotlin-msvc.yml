@@ -32,12 +32,12 @@ jobs:
           java-version: '21'
       - name: MSVC detection, command lines, COFF rewrite and directive blanking
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon --console=plain :compose:test --tests 'org.jetbrains.compose.desktop.application.extended.msvc.*'
+        run: ./gradlew --no-daemon --console=plain :kotlin-native-desktop:test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: msvc-unit-reports
-          path: gradle-plugins/compose/build/reports
+          path: extended/kotlin-native-desktop/build/reports
           if-no-files-found: ignore
 
   hello:
@@ -50,7 +50,7 @@ jobs:
         include:
           - { name: linux-x64, os: ubuntu-24.04, task: linkReleaseExecutableLinuxX64 }
           - { name: macos-arm64, os: macos-latest, task: linkReleaseExecutableMacosArm64 }
-          - { name: windows-msvc, os: windows-latest, task: linkMsvcExecutableHello }
+          - { name: windows-msvc, os: windows-latest, task: linkReleaseExecutableMingwX64 }
     defaults:
       run:
         shell: bash
@@ -63,7 +63,7 @@ jobs:
 
       - name: Plugin to the local repository
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon --console=plain :compose:publishToMavenLocal -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+        run: ./gradlew --no-daemon --console=plain :kotlin-native-desktop:publishToMavenLocal -Pdeploy.version=0.1.0-extended-dev
 
       - name: The MSVC on this runner
         if: runner.os == 'Windows'
@@ -95,7 +95,7 @@ jobs:
           vswhere="$(cygpath -u "${PROGRAMFILES_X86:-C:\\Program Files (x86)}")/Microsoft Visual Studio/Installer/vswhere.exe"
           root="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r' | sed 's|\\|/|g')"
           dumpbin="$(ls "$root"/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe | tail -1)"
-          "$dumpbin" /nologo /dependents build/bin/msvc/hello/hello.exe | tee dumpbin.log
+          "$dumpbin" /nologo /dependents build/bin/mingwX64/releaseExecutable/hello.exe | tee dumpbin.log
           # Only parts of Windows: no MinGW or Visual C++ runtime DLL beside the executable.
           ! grep -iE 'libstdc|libgcc|libwinpthread|vcruntime|msvcp' dumpbin.log
 
@@ -104,10 +104,10 @@ jobs:
         working-directory: extended/native-desktop/hello-plain
         run: |
           set -u
-          cp build/bin/msvc/hello/hello.exe hello-rewritten.exe
-          if ./gradlew --no-daemon --console=plain linkMsvcExecutableHello -Phello.unrewritten=true > control-link.log 2>&1; then
+          cp build/bin/mingwX64/releaseExecutable/hello.exe hello-rewritten.exe
+          if ./gradlew --no-daemon --console=plain linkReleaseExecutableMingwX64 -Phello.unrewritten=true > control-link.log 2>&1; then
             status=0
-            timeout 60 build/bin/msvc/hello/hello.exe --self-check > control-run.log 2>&1 || status=$?
+            timeout 60 build/bin/mingwX64/releaseExecutable/hello.exe --self-check > control-run.log 2>&1 || status=$?
             cat control-run.log
             if [ "$status" -eq 0 ] && grep -q 'self-check ok' control-run.log; then
               echo "the control passed without the rewrite, so the rewrite proves nothing" >&2

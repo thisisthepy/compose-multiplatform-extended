@@ -39,6 +39,12 @@ tasks.named("compileKotlin", KotlinCompilationTask::class) {
 }
 sourceSets.main.configure {
     java.srcDir(buildConfig.flatMap { it.generatedOutputDir })
+    // Fork-only code, see extended/gradle-plugin-kn.
+    java.srcDir("../../extended/gradle-plugin-kn/src/main/kotlin")
+    resources.srcDir("../../extended/gradle-plugin-kn/src/main/resources")
+}
+sourceSets.test.configure {
+    java.srcDir("../../extended/gradle-plugin-kn/src/test/kotlin")
 }
 
 val embeddedDependencies by configurations.creating {

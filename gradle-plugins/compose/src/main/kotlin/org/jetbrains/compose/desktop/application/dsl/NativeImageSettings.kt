@@ -20,6 +20,12 @@ import javax.inject.Inject
  */
 abstract class NativeImageSettings @Inject constructor(objects: ObjectFactory) {
     /**
+     * A checkout of compose-multiplatform-core-extended. Its `extended/window` C and
+     * Objective-C sources are compiled into an [ApplicationWindowing.AwtFree] image.
+     */
+    val windowSourcesDirectory: DirectoryProperty = objects.directoryProperty()
+
+    /**
      * The GraalVM that builds the image. On macOS it has to be a distribution that ships the
      * JDK's AWT as static archives, which Liberica NIK Full does. Defaults to GRAALVM_HOME.
      */

@@ -22,10 +22,10 @@ the fork of the Compose libraries.
 - `runNativeImageAgent`: records the reachability metadata the image is built from.
 - AWT-free windows: with `windowing = ApplicationWindowing.AwtFree` the window comes from the
   extended window modules, not from the JDK's AWT.
-- Kotlin/Native desktop outputs for macOS, Linux and Windows. A window app is a `.app` and a
-  `.dmg` (signing, notarization, universal binary), an `.AppImage` and a Flatpak, or an `.exe`
-  and an `.msix`, with a recorded checksum. A command line program is a `.kexe` (signed on
-  macOS) or an `.exe`, with no packaging.
+- Kotlin/Native desktop packaging for macOS, Linux and Windows with upstream's own
+  `TargetFormat` names: `.app` and `.dmg` (and `.pkg` for the store), `.AppImage` with `.deb`
+  and `.rpm`, `.exe`. Signing, notarization and a universal binary on macOS. A command line
+  program is a `.kexe` (signed on macOS) or an `.exe`, with no packaging.
 - Run tasks for every output, and a Windows application that is DPI aware on a scaled display.
 - Upstream's `compose` DSL and public API are unchanged, so an existing Compose project keeps
   working. New settings are additive.
@@ -76,7 +76,7 @@ The plugin keeps JetBrains' ID for now. A rename to `org.thisisthepy.compose` is
 |---|---|---|---|
 | JVM | an application with a Java runtime beside it (dmg, deb, msi, ...) | `packageDistributionForCurrentOS` | upstream's, unchanged |
 | GraalVM native image | one executable, no runtime | `packageNativeImage` | [One executable](#one-executable-packagenativeimage) below |
-| Kotlin/Native | one executable per target: `.app` + `.dmg`, `.AppImage` + Flatpak or `.exe` + `.msix` for a window app; `.kexe` or `.exe` for a command line program | `packageKotlinNative` | [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
+| Kotlin/Native | one executable per target, packaged with the same `TargetFormat`s (table below), or the bare `.kexe`/`.exe` for a command line program | `packageKotlinNative` |
 
 `packageApplication` runs the one the `output` setting names:
 
@@ -103,25 +103,33 @@ compose.desktop.application {
 
 What each kind of Kotlin/Native app produces. Owner, 2026-10-05:
 
-> [user] "Compose 플러그인의 패키징에서 msi 빼란 이야기는 아니었거든? 그쪽은 패키징 해주는게 맞지. 컴포즈 플러그인 출력: Mac: 앱은 .app 패키지는 .dmg / 리눅스: 앱 .appimage 패키지는 flat뭐시기 / 윈도우: 앱 .exe 패키지는 msix"
+> [user] "업스트림이 지원하는게 저렇게 다양하면 업스트림쪽에서 확장하는게 맞긴 하지. Mac: 앱은 .app 패키지는 .dmg 스토어 패키지는 .pkg / 리눅스: 앱 .appimage 패키지는 .deb/.rpm 스토어 패키지는 .flatpack / 윈도우: 앱 .exe 패키지는 .msi/.exe(설치) 스토어 패키지는 .msix / 이렇게 가자. 그럼 업스트림 기능 확장 정도이겠네."
 
-and, for the command line plugin:
+| OS | App | Package | Store package |
+|---|---|---|---|
+| macOS | `.app` | `.dmg` | `.pkg` |
+| Linux | `.AppImage` | `.deb`, `.rpm` | Flatpak |
+| Windows | `.exe` | `.msi` (under decision), installer `.exe` (Velopack) | `.msix` |
+
+The Compose plugin extends upstream's `nativeDistributions`: the same `TargetFormat`s that
+already work on the JVM output (`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`) work for a Kotlin/Native
+window app, and the formats upstream lacks (a real `.AppImage` file, Flatpak, MSIX) are added
+in the same style. Today `.dmg`, `.pkg`, `.deb` and `.rpm` are implemented. Flatpak, `.msix` and
+the Velopack installer are being built, and `.msi` is under decision.
+
+Signing. `.dmg`, `.msi` and the installer `.exe` install unsigned and are the default way to
+distribute. `.pkg` and `.msix` are store formats: they are for store submission (the store
+re-signs) or for when a certificate exists.
+
+For command line programs:
 
 > [user] "Cli 플러그인에는 확장자 .kexe랑 .exe가 맞지. .kexe에 서명하면 되고. .app이랑 .appimage는 gui 앱일때 하는게 맞는거같고 .msi 패키지는 너무 갔어"
-
-| App | macOS | Linux | Windows |
-|---|---|---|---|
-| With a window (Compose): app | `.app` | `.AppImage` | `.exe` |
-| With a window (Compose): package | `.dmg` | Flatpak | `.msix` |
-| Command line | `.kexe`, signed | `.kexe` | `.exe` |
 
 A command line program is not packaged: the executable is the output. On macOS the `.kexe` is
 signed, ad hoc by default (the linker's signature is kept, and made again after any edit
 after the link) or with a Developer ID when a certificate is configured. Notarization cannot
-be stapled to a bare file, so it is an optional task that submits a zip. `.msi` and `.deb`
-are not made for Kotlin/Native applications. The JVM output keeps upstream's
-`nativeDistributions` formats. The `.msix` is unsigned unless a certificate is set, and then
-comes with install instructions.
+be stapled to a bare file, so it is an optional task that submits a zip. The JVM output keeps
+upstream's `nativeDistributions` formats.
 
 ### Windows needs the MSVC Build Tools
 

@@ -17,7 +17,7 @@ Compose Gradle 플러그인의 저장소인
 - `packageNativeImage`: 애플리케이션을 GraalVM native-image 실행 파일 하나로 만듭니다. 옆에 Java 런타임이 없습니다 (macOS arm64, Linux x64, Windows x64).
 - `runNativeImageAgent`: 이미지를 빌드할 때 쓰는 reachability 메타데이터를 기록합니다.
 - AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다.
-- macOS, Linux, Windows 용 Kotlin/Native 데스크톱 출력. 창이 있는 앱은 `.app` 과 `.dmg`(서명, 공증, 유니버설 바이너리), `.AppImage` 와 Flatpak, `.exe` 와 `.msix` 이고 체크섬을 기록합니다. 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
+- macOS, Linux, Windows 용 Kotlin/Native 데스크톱 패키징. 업스트림의 `TargetFormat` 이름을 그대로 씁니다. `.app` 과 `.dmg`(스토어용은 `.pkg`), `.AppImage` 와 `.deb`, `.rpm`, `.exe`. macOS 에서는 서명, 공증, 유니버설 바이너리를 지원합니다. 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
 - 모든 출력의 실행 태스크, 그리고 배율이 적용된 화면에서 DPI 를 인식하는 Windows 애플리케이션.
 - 업스트림의 `compose` DSL 과 공개 API 는 그대로입니다. 기존 Compose 프로젝트가 그대로 동작하고, 새 설정은 추가만 합니다.
 
@@ -46,7 +46,7 @@ JetBrains 의 ID 를 그대로 씁니다. `org.thisisthepy.compose` 로 바꾸�
 |---|---|---|---|
 | JVM | Java 런타임을 옆에 둔 애플리케이션 (dmg, deb, msi 등) | `packageDistributionForCurrentOS` | 업스트림 그대로 |
 | GraalVM native image | 런타임 없는 실행 파일 하나 | `packageNativeImage` | 아래 "실행 파일 하나" |
-| Kotlin/Native | 타깃마다 실행 파일 하나: 창이 있는 앱은 `.app` + `.dmg`, `.AppImage` + Flatpak, `.exe` + `.msix`, 명령줄 프로그램은 `.kexe` 또는 `.exe` | `packageKotlinNative` | [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
+| Kotlin/Native | 타깃마다 실행 파일 하나를 같은 `TargetFormat` 으로 패키징(아래 표), 명령줄 프로그램은 패키징 없는 `.kexe`/`.exe` | `packageKotlinNative` |
 
 `packageApplication` 은 `output` 설정이 가리키는 출력을 실행합니다.
 
@@ -58,19 +58,23 @@ JetBrains 의 ID 를 그대로 씁니다. `org.thisisthepy.compose` 로 바꾸�
 
 Kotlin/Native 앱 종류별 출력입니다. 소유자, 2026-10-05:
 
-> [user] "Compose 플러그인의 패키징에서 msi 빼란 이야기는 아니었거든? 그쪽은 패키징 해주는게 맞지. 컴포즈 플러그인 출력: Mac: 앱은 .app 패키지는 .dmg / 리눅스: 앱 .appimage 패키지는 flat뭐시기 / 윈도우: 앱 .exe 패키지는 msix"
+> [user] "업스트림이 지원하는게 저렇게 다양하면 업스트림쪽에서 확장하는게 맞긴 하지. Mac: 앱은 .app 패키지는 .dmg 스토어 패키지는 .pkg / 리눅스: 앱 .appimage 패키지는 .deb/.rpm 스토어 패키지는 .flatpack / 윈도우: 앱 .exe 패키지는 .msi/.exe(설치) 스토어 패키지는 .msix / 이렇게 가자. 그럼 업스트림 기능 확장 정도이겠네."
 
-명령줄 플러그인에 대해서는 다음과 같습니다.
+| OS | 앱 | 패키지 | 스토어 패키지 |
+|---|---|---|---|
+| macOS | `.app` | `.dmg` | `.pkg` |
+| Linux | `.AppImage` | `.deb`, `.rpm` | Flatpak |
+| Windows | `.exe` | `.msi`(결정 중), 설치용 `.exe`(Velopack) | `.msix` |
+
+Compose 플러그인은 업스트림의 `nativeDistributions` 를 확장합니다. JVM 출력에서 이미 동작하는 `TargetFormat`(`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`)이 Kotlin/Native 창 앱에서도 동작하고, 업스트림에 없는 형식(진짜 `.AppImage` 파일, Flatpak, MSIX)은 같은 방식으로 더합니다. 지금 구현된 것은 `.dmg`, `.pkg`, `.deb`, `.rpm` 입니다. Flatpak, `.msix`, Velopack 설치 프로그램은 만드는 중이고 `.msi` 는 결정 중입니다.
+
+서명. `.dmg`, `.msi`, 설치용 `.exe` 는 서명 없이 설치되며 기본 배포 경로입니다. `.pkg` 와 `.msix` 는 스토어 형식으로, 스토어 제출(스토어가 다시 서명)이나 인증서가 있을 때를 위한 것입니다.
+
+명령줄 프로그램은 다음과 같습니다.
 
 > [user] "Cli 플러그인에는 확장자 .kexe랑 .exe가 맞지. .kexe에 서명하면 되고. .app이랑 .appimage는 gui 앱일때 하는게 맞는거같고 .msi 패키지는 너무 갔어"
 
-| 앱 | macOS | Linux | Windows |
-|---|---|---|---|
-| 창이 있음 (Compose): 앱 | `.app` | `.AppImage` | `.exe` |
-| 창이 있음 (Compose): 패키지 | `.dmg` | Flatpak | `.msix` |
-| 명령줄 | `.kexe`, 서명 | `.kexe` | `.exe` |
-
-명령줄 프로그램은 패키징하지 않습니다. 실행 파일이 곧 출력입니다. macOS 의 `.kexe` 는 기본으로 ad hoc 서명하고(링커의 서명을 유지하며, 링크 뒤에 파일을 고치면 다시 서명합니다), 인증서를 설정하면 Developer ID 로 서명합니다. 단독 파일에는 공증 티켓을 붙일 수 없으므로 공증은 zip 을 제출하는 선택 태스크입니다. `.msi` 와 `.deb` 는 Kotlin/Native 애플리케이션에 만들지 않습니다. JVM 출력은 업스트림의 `nativeDistributions` 형식을 그대로 씁니다. `.msix` 는 인증서를 설정하지 않으면 서명하지 않으며, 설치 안내가 함께 나옵니다.
+명령줄 프로그램은 패키징하지 않습니다. 실행 파일이 곧 출력입니다. macOS 의 `.kexe` 는 기본으로 ad hoc 서명하고(링커의 서명을 유지하며, 링크 뒤에 파일을 고치면 다시 서명합니다), 인증서를 설정하면 Developer ID 로 서명합니다. 단독 파일에는 공증 티켓을 붙일 수 없으므로 공증은 zip 을 제출하는 선택 태스크입니다. JVM 출력은 업스트림의 `nativeDistributions` 형식을 그대로 씁니다.
 
 ### Windows 는 MSVC Build Tools 가 필요하다
 

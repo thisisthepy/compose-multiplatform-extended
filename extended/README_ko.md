@@ -17,7 +17,7 @@ Compose Gradle 플러그인의 저장소인
 - `packageNativeImage`: 애플리케이션을 GraalVM native-image 실행 파일 하나로 만듭니다. 옆에 Java 런타임이 없습니다 (macOS arm64, Linux x64, Windows x64).
 - `runNativeImageAgent`: 이미지를 빌드할 때 쓰는 reachability 메타데이터를 기록합니다.
 - AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다.
-- macOS, Linux, Windows 용 Kotlin/Native 데스크톱 출력: 창이 있는 앱은 Info.plist, 아이콘, 서명, 공증, 유니버설 바이너리를 갖춘 `.app`, `.AppImage`, `.exe` 입니다. 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
+- macOS, Linux, Windows 용 Kotlin/Native 데스크톱 출력. 창이 있는 앱은 `.app` 과 `.dmg`(서명, 공증, 유니버설 바이너리), `.AppImage` 와 Flatpak, `.exe` 와 `.msix` 이고 체크섬을 기록합니다. 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
 - 모든 출력의 실행 태스크, 그리고 배율이 적용된 화면에서 DPI 를 인식하는 Windows 애플리케이션.
 - 업스트림의 `compose` DSL 과 공개 API 는 그대로입니다. 기존 Compose 프로젝트가 그대로 동작하고, 새 설정은 추가만 합니다.
 
@@ -46,29 +46,31 @@ JetBrains 의 ID 를 그대로 씁니다. `org.thisisthepy.compose` 로 바꾸�
 |---|---|---|---|
 | JVM | Java 런타임을 옆에 둔 애플리케이션 (dmg, deb, msi 등) | `packageDistributionForCurrentOS` | 업스트림 그대로 |
 | GraalVM native image | 런타임 없는 실행 파일 하나 | `packageNativeImage` | 아래 "실행 파일 하나" |
-| Kotlin/Native | 타깃마다 실행 파일 하나: 창이 있는 앱은 `.app`, `.AppImage`, `.exe`, 명령줄 프로그램은 `.kexe` 또는 `.exe` | `packageKotlinNative` | [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
+| Kotlin/Native | 타깃마다 실행 파일 하나: 창이 있는 앱은 `.app` + `.dmg`, `.AppImage` + Flatpak, `.exe` + `.msix`, 명령줄 프로그램은 `.kexe` 또는 `.exe` | `packageKotlinNative` | [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
 
 `packageApplication` 은 `output` 설정이 가리키는 출력을 실행합니다.
 
 ### 플러그인 둘
 
-- **Compose 데스크톱**, `org.thisisthepy.compose`: Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다.
-- **명령줄 프로그램용 Kotlin/Native 데스크톱**: Compose 도 창도 없습니다. 플러그인 ID 는 Kotlin 빌드 도구의 이름 규칙을 따라
-  `org.thisisthepy.kotlin.*` 이고, 정확한 ID 는 출시할 때 알립니다. 소유자, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
+- **Compose 데스크톱**, `org.thisisthepy.compose`: Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다. 창이 있는 Kotlin/Native 앱은 패키징합니다.
+- **명령줄 프로그램용 Kotlin/Native 데스크톱**, `org.thisisthepy.kotlin.native.desktop`: Compose 도 창도 없습니다. ID 는 Kotlin 빌드 도구의 이름 규칙을 따릅니다
+  (`org.jetbrains.kotlin.native.cocoapods` 는 `org.thisisthepy.kotlin.native.<feature>` 에 대응합니다). 소유자, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
 
-Kotlin/Native 앱 종류별 출력과 그 이유입니다. 소유자, 2026-10-05:
+Kotlin/Native 앱 종류별 출력입니다. 소유자, 2026-10-05:
+
+> [user] "Compose 플러그인의 패키징에서 msi 빼란 이야기는 아니었거든? 그쪽은 패키징 해주는게 맞지. 컴포즈 플러그인 출력: Mac: 앱은 .app 패키지는 .dmg / 리눅스: 앱 .appimage 패키지는 flat뭐시기 / 윈도우: 앱 .exe 패키지는 msix"
+
+명령줄 플러그인에 대해서는 다음과 같습니다.
 
 > [user] "Cli 플러그인에는 확장자 .kexe랑 .exe가 맞지. .kexe에 서명하면 되고. .app이랑 .appimage는 gui 앱일때 하는게 맞는거같고 .msi 패키지는 너무 갔어"
 
 | 앱 | macOS | Linux | Windows |
 |---|---|---|---|
-| 창이 있음 (Compose) | `.app` | `.AppImage` | `.exe` |
+| 창이 있음 (Compose): 앱 | `.app` | `.AppImage` | `.exe` |
+| 창이 있음 (Compose): 패키지 | `.dmg` | Flatpak | `.msix` |
 | 명령줄 | `.kexe`, 서명 | `.kexe` | `.exe` |
 
-명령줄 프로그램은 패키징하지 않습니다. 실행 파일이 곧 출력입니다. macOS 의 `.kexe` 는 기본으로 ad hoc 서명하고(링커의 서명을 유지하며,
-링크 뒤에 파일을 고치면 다시 서명합니다), 인증서를 설정하면 Developer ID 로 서명합니다. 단독 파일에는 공증 티켓을 붙일 수 없으므로
-공증은 zip 을 제출하는 선택 태스크입니다. 설치 프로그램(`.msi`, `.deb`)은 Kotlin/Native 애플리케이션에 만들지 않습니다. JVM 출력은
-업스트림의 `nativeDistributions` 형식을 그대로 씁니다.
+명령줄 프로그램은 패키징하지 않습니다. 실행 파일이 곧 출력입니다. macOS 의 `.kexe` 는 기본으로 ad hoc 서명하고(링커의 서명을 유지하며, 링크 뒤에 파일을 고치면 다시 서명합니다), 인증서를 설정하면 Developer ID 로 서명합니다. 단독 파일에는 공증 티켓을 붙일 수 없으므로 공증은 zip 을 제출하는 선택 태스크입니다. `.msi` 와 `.deb` 는 Kotlin/Native 애플리케이션에 만들지 않습니다. JVM 출력은 업스트림의 `nativeDistributions` 형식을 그대로 씁니다. `.msix` 는 인증서를 설정하지 않으면 서명하지 않으며, 설치 안내가 함께 나옵니다.
 
 ### Windows 는 MSVC Build Tools 가 필요하다
 

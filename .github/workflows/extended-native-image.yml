@@ -21,7 +21,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: 431383c3ae5b5546f9e00281cc265c1cf873c738
+  CORE_EXTENDED_REF: dd28be8e5439284f472173773ae9df1d0d934b53
   PLUGIN_VERSION: 1.11.1-extended-dev
   COMPOSE_VERSION: 1.11.1
   NIK_BASE: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2

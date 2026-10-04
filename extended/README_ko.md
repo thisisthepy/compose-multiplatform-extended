@@ -17,7 +17,8 @@ Compose Gradle 플러그인의 저장소인
 - `packageNativeImage`: 애플리케이션을 GraalVM native-image 실행 파일 하나로 만듭니다. 옆에 Java 런타임이 없습니다 (macOS arm64, Linux x64, Windows x64).
 - `runNativeImageAgent`: 이미지를 빌드할 때 쓰는 reachability 메타데이터를 기록합니다.
 - AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다.
-- macOS, Linux, Windows 용 Kotlin/Native 데스크톱 패키징. 업스트림의 `TargetFormat` 이름을 그대로 씁니다. `.app` 과 `.dmg`(스토어용은 `.pkg`), `.AppImage` 와 `.deb`, `.rpm`, `.exe`. macOS 에서는 서명, 공증, 유니버설 바이너리를 지원합니다. 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
+- macOS, Linux, Windows 용 Kotlin/Native 데스크톱 패키징 태스크. 업스트림의 `TargetFormat` 이름을 그대로 씁니다. 병합되어 단위 테스트를 거쳤지만 아직 CI 에서 빌드하지는 않았습니다. 실제 앱을 링크하고 패키징하는 CI 셀은 [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26) 에 있습니다. 형식별 상태는 아래 "Kotlin/Native 앱 종류별 출력" 을 보십시오.
+- 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
 - 모든 출력의 실행 태스크, 그리고 배율이 적용된 화면에서 DPI 를 인식하는 Windows 애플리케이션.
 - 업스트림의 `compose` DSL 과 공개 API 는 그대로입니다. 기존 Compose 프로젝트가 그대로 동작하고, 새 설정은 추가만 합니다.
 
@@ -66,17 +67,27 @@ Kotlin/Native 앱 종류별 출력입니다. 소유자, 2026-10-05:
 | Linux | `.AppImage` | `.deb`, `.rpm` | Flatpak |
 | Windows | `.exe` | `.msi`, `.exe`(설치) | `.msix` |
 
-Compose 플러그인은 업스트림의 `nativeDistributions` 를 확장합니다. JVM 출력에서 이미 동작하는 `TargetFormat`(`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`)이 Kotlin/Native 창 앱에서도 동작하고, 업스트림에 없는 형식(진짜 `.AppImage` 파일, Flatpak, MSIX)은 같은 방식으로 더합니다.
+Compose 플러그인은 업스트림의 `nativeDistributions` 를 확장합니다. JVM 출력에서 이미 동작하는 `TargetFormat` 이 Kotlin/Native 창 앱에서도 동작하고, 업스트림에 없는 형식은 같은 방식으로 더합니다. 형식별 상태는 2026-10-05 기준입니다.
 
-직접 배포 형식은 모든 OS 에서 Velopack 이 만듭니다. Windows 의 `Setup.exe` 와 `.msi`, macOS 의 `.dmg`(Velopack 은 dmg 를 만들지 못하므로 Velopack 의 portable zip 안의 `.app` 으로 만듭니다), Linux 의 `.AppImage` 입니다. 소유자, 2026-10-05:
+| 형식 | 상태 |
+|---|---|
+| `.app`, `.dmg` | 병합됨(업스트림 태스크에 서명과 공증 추가). 아직 CI 에서 빌드하지 않음 |
+| `.pkg`(App Store 형식) | 병합됨. 아직 CI 에서 빌드하지 않음 |
+| `.deb`, `.rpm` | 병합됨. 아직 CI 에서 빌드하지 않음 |
+| `.AppImage` | 첫 태스크는 병합됨. 자동 업데이트되는 Velopack AppImage 는 시작하지 않음 |
+| `.exe` 폴더, `.msi` | 첫 버전은 병합됨. Velopack 이 대체할 예정이며 Velopack 변경은 아직 열리지 않음 |
+| Windows 설치용 `.exe`(Velopack `Setup.exe`) | 아직 열리지 않음 |
+| Velopack portable zip 으로 만드는 `.dmg` | 아직 열리지 않음 |
+| Flatpak, `.msix`, 진짜 `.AppImage` 파일 형식 | 열려 있음, [#40](https://github.com/thisisthepy/compose-multiplatform-extended/pull/40) |
+| Kotlin/Native 빌드·패키징 CI 셀 | 열려 있음, [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26) |
+
+Velopack 은 모든 OS 의 직접 배포 형식(Windows `Setup.exe` 와 `.msi`, macOS `.dmg`, Linux `.AppImage`)을 만들 계획입니다. 계획이지 현재 상태가 아닙니다. 소유자, 2026-10-05:
 
 > [user] "윈도우는 Velopack으로 하자. NSIS랑 wix는 너무 별로야."
 
-플러그인은 패키지와 업데이트 피드 산출물(전체·델타 패키지와 `releases.<channel>.json`)을 만듭니다. 설치된 앱을 업데이트하는 일은 플러그인의 몫이 아닙니다. 앱 개발자는 Velopack SDK 를 직접 씁니다. 소유자, 2026-10-05:
+플러그인은 패키지와 업데이트 피드 산출물을 만들 예정입니다. 설치된 앱을 업데이트하는 일은 플러그인의 몫이 아니며, 앱 개발자는 Velopack SDK 를 직접 씁니다. 소유자, 2026-10-05:
 
 > [user] "업데이트 sdk 때문에 그런거면 그건 우리가 커버쳐줄 부분은 아닌거같아."
-
-`.pkg`(Velopack 이 만드는 일반 `.pkg` 와 따로 만드는 Mac App Store 형식), `.deb`, `.rpm` 은 플러그인의 태스크가 만듭니다. Flatpak 과 `.msix` 는 따로 만듭니다. 각각의 상태는 [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) 에 있습니다.
 
 서명. `.dmg`, `.msi`, 설치용 `.exe` 는 서명 없이 설치되며 기본 배포 경로입니다. `.pkg` 와 `.msix` 는 스토어 형식으로, 스토어 제출(스토어가 다시 서명)이나 인증서가 있을 때를 위한 것입니다.
 

@@ -1,0 +1,23 @@
+name: velopack-macos-adhoc-probe
+on:
+  push:
+    paths: ['probes/velopack-macos/**', '.github/workflows/velopack-probe.yml']
+  workflow_dispatch:
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+        dest: ["/Applications", "/Users/runner/Applications"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bash probes/velopack-macos/probe.sh "${{ matrix.dest }}" 2>&1 | tee probe-${{ strategy.job-index }}.log
+        shell: bash
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-${{ matrix.os }}-${{ strategy.job-index }}
+          path: probe-*.log

@@ -17,7 +17,7 @@ internal fun JvmApplicationContext.validatePackageVersions() {
 
     for (targetFormat in app.nativeDistributions.targetFormats) {
         val versionChecker: VersionChecker? = when (targetFormat) {
-            TargetFormat.AppImage -> null
+            TargetFormat.AppImage, TargetFormat.AppImageFile, TargetFormat.Flatpak, TargetFormat.Msix -> null
             TargetFormat.Deb -> DebVersionChecker
             TargetFormat.Rpm -> RpmVersionChecker
             TargetFormat.Msi, TargetFormat.Exe -> WindowsVersionChecker
@@ -96,7 +96,7 @@ private fun dslPropertiesFor(
     val packageVersion = "packageVersion"
 
     val formatSpecificProperty: String? = when (targetFormat) {
-        TargetFormat.AppImage -> null
+        TargetFormat.AppImage, TargetFormat.AppImageFile, TargetFormat.Flatpak, TargetFormat.Msix -> null
         TargetFormat.Deb -> "$linux.debPackageVersion"
         TargetFormat.Rpm -> "$linux.rpmPackageVersion"
         TargetFormat.Dmg -> "$macOS.dmgPackageVersion"

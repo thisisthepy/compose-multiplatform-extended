@@ -32,6 +32,13 @@ abstract class CheckNativeImageNoAwtTask : DefaultTask() {
     fun check() {
         val file = executable.get().asFile
         if (!file.isFile) throw GradleException("$file does not exist, so there is no executable to check.")
+        val beside = NativeImageNoAwt.awtLibrariesBeside(file.parentFile)
+        if (beside.isNotEmpty()) {
+            throw GradleException(
+                "native-image wrote ${beside.joinToString()} beside $file, which it does for the JDK's AWT libraries " +
+                    "an image can reach. An AwtFree image reaches none."
+            )
+        }
         val found = NativeImageNoAwt.scanExecutable(file)
         if (found.isNotEmpty()) {
             throw GradleException(

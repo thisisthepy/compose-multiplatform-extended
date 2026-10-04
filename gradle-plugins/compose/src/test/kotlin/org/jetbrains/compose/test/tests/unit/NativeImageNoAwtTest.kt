@@ -83,4 +83,12 @@ class NativeImageNoAwtTest {
         assertEquals(setOf("Java_sun_awt_", "libawt"), NativeImageNoAwt.scanExecutable(lib))
         assertFalse(NativeImageNoAwt.forbiddenSymbols.isEmpty())
     }
+
+    @Test
+    fun awtLibrariesBesideAnImageAreFound(@TempDir dir: File) {
+        for (name in listOf("app", "libskiko.so", "libawt.so", "libawt_xawt.so", "libfontmanager.so", "jawt.dll")) {
+            dir.resolve(name).writeText("")
+        }
+        assertEquals(listOf("jawt.dll", "libawt.so", "libawt_xawt.so", "libfontmanager.so"), NativeImageNoAwt.awtLibrariesBeside(dir))
+    }
 }

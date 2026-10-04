@@ -102,6 +102,17 @@ internal object NativeImageNoAwt {
     )
 
     /**
+     * The shared libraries of the JDK's AWT that native-image copies beside an image when
+     * AWT's natives are reachable from it, found by name in [directory]. An AwtFree image has
+     * none, so one here is a second sign that AWT got in.
+     */
+    fun awtLibrariesBeside(directory: File): List<String> =
+        directory.listFiles().orEmpty().map { it.name }.filter { name ->
+            val base = name.removePrefix("lib").substringBefore('.')
+            base in setOf("awt", "awt_xawt", "awt_headless", "jawt", "fontmanager", "osxui", "awt_lwawt", "javajpeg", "lcms", "mlib_image")
+        }.sorted()
+
+    /**
      * Searches [executable] for [forbiddenSymbols] and returns the ones that occur. A symbol
      * table is only one place a name can sit (a stripped image keeps its dynamic exports and
      * the strings of its image heap), so the whole file is searched.

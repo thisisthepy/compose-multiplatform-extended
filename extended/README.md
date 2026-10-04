@@ -22,8 +22,9 @@ the fork of the Compose libraries.
 - `runNativeImageAgent`: records the reachability metadata the image is built from.
 - AWT-free windows: with `windowing = ApplicationWindowing.AwtFree` the window comes from the
   extended window modules, not from the JDK's AWT.
-- Kotlin/Native desktop packaging for macOS, Linux and Windows: `.app` with Info.plist, icon,
-  signing, notarization and a universal binary; AppImage and deb; exe folder, zip and msi.
+- Kotlin/Native desktop outputs for macOS, Linux and Windows: a window app is a `.app` with
+  Info.plist, icon, signing, notarization and a universal binary, an `.AppImage`, or an `.exe`;
+  a command line program is a `.kexe` (signed on macOS) or an `.exe`, with no packaging.
 - Run tasks for every output, and a Windows application that is DPI aware on a scaled display.
 - Upstream's `compose` DSL and public API are unchanged, so an existing Compose project keeps
   working. New settings are additive.
@@ -74,7 +75,7 @@ The plugin keeps JetBrains' ID for now. A rename to `org.thisisthepy.compose` is
 |---|---|---|---|
 | JVM | an application with a Java runtime beside it (dmg, deb, msi, ...) | `packageDistributionForCurrentOS` | upstream's, unchanged |
 | GraalVM native image | one executable, no runtime | `packageNativeImage` | [One executable](#one-executable-packagenativeimage) below |
-| Kotlin/Native | one executable per target, packaged for the OS | `packageKotlinNative` | [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
+| Kotlin/Native | one executable per target: `.app`, `.AppImage` or `.exe` for a window app, `.kexe` or `.exe` for a command line program | `packageKotlinNative` | [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
 
 `packageApplication` runs the one the `output` setting names:
 
@@ -89,6 +90,30 @@ compose.desktop.application {
     }
 }
 ```
+
+### Two plugins
+
+- **Compose desktop**, `org.thisisthepy.compose`: applications with a Compose window, in all
+  three outputs above.
+- **Kotlin/Native desktop for command line programs**: no Compose and no window. The plugin id
+  follows the Kotlin build tooling's naming, `org.thisisthepy.kotlin.*`, and the exact id is
+  announced when it ships. Owner, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
+
+What each kind of Kotlin/Native app produces, and why. Owner, 2026-10-05:
+
+> [user] "Cli 플러그인에는 확장자 .kexe랑 .exe가 맞지. .kexe에 서명하면 되고. .app이랑 .appimage는 gui 앱일때 하는게 맞는거같고 .msi 패키지는 너무 갔어"
+
+| App | macOS | Linux | Windows |
+|---|---|---|---|
+| With a window (Compose) | `.app` | `.AppImage` | `.exe` |
+| Command line | `.kexe`, signed | `.kexe` | `.exe` |
+
+A command line program is not packaged: the executable is the output. On macOS the `.kexe` is
+signed, ad hoc by default (the linker's signature is kept, and made again after any edit
+after the link) or with a Developer ID when a certificate is configured. Notarization cannot
+be stapled to a bare file, so it is an optional task that submits a zip. Installers (`.msi`,
+`.deb`) are not made for Kotlin/Native applications. The JVM output keeps upstream's
+`nativeDistributions` formats.
 
 ### Windows needs the MSVC Build Tools
 
@@ -105,7 +130,7 @@ is missing. The GraalVM native image on Windows has the same toolset requirement
 
 ### macOS signing and notarization
 
-The Kotlin/Native `.app` is signed by `signDistributableNative...`: with a Developer ID
+The Kotlin/Native `.app` is signed by `signDistributableNative...` (a `.kexe` by `signExecutableNative...`): with a Developer ID
 identity when `nativeDistributions.macOS.signing { identity = "..." }` is set, ad hoc
 otherwise (enough to run on the machine that built it). `notarizeDmgNative...` submits the
 dmg with `macOS.notarization { appleID, password, teamID }` and staples the ticket. Without

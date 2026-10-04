@@ -21,6 +21,7 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentArch
@@ -50,6 +51,9 @@ import java.util.zip.ZipFile
  *   ones this platform does not implement are defined as stops, found by reading skiko's
  *   classes for native methods and subtracting what the archive defines.
  */
+@DisableCachingByDefault(
+    because = "The image depends on the GraalVM at graalvmHome and the host's C toolchain, neither of which is an input"
+)
 abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
     @get:Classpath

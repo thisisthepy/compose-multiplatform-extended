@@ -68,7 +68,7 @@ jobs:
       - name: The MSVC on this runner
         if: runner.os == 'Windows'
         run: |
-          vswhere="$(cygpath -u "${PROGRAMFILES_X86:-C:\\Program Files (x86)}")/Microsoft Visual Studio/Installer/vswhere.exe"
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           "$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath -property installationVersion
           for root in $("$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | tr -d '\r' | sed 's|\\|/|g'); do
             ls "$root/VC/Tools/MSVC"
@@ -92,7 +92,7 @@ jobs:
         working-directory: extended/native-desktop/hello-plain
         run: |
           set -euo pipefail
-          vswhere="$(cygpath -u "${PROGRAMFILES_X86:-C:\\Program Files (x86)}")/Microsoft Visual Studio/Installer/vswhere.exe"
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           root="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r' | sed 's|\\|/|g')"
           dumpbin="$(ls "$root"/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe | tail -1)"
           "$dumpbin" /nologo /dependents build/bin/mingwX64/releaseExecutable/hello.exe | tee dumpbin.log

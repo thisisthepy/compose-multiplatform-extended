@@ -22,10 +22,11 @@ the fork of the Compose libraries.
 - `runNativeImageAgent`: records the reachability metadata the image is built from.
 - AWT-free windows: with `windowing = ApplicationWindowing.AwtFree` the window comes from the
   extended window modules, not from the JDK's AWT.
-- Kotlin/Native desktop packaging for macOS, Linux and Windows with upstream's own
-  `TargetFormat` names: `.app` and `.dmg` (and `.pkg` for the store), `.AppImage` with `.deb`
-  and `.rpm`, `.exe`. Signing, notarization and a universal binary on macOS. A command line
-  program is a `.kexe` (signed on macOS) or an `.exe`, with no packaging.
+- Kotlin/Native desktop packaging tasks for macOS, Linux and Windows, with upstream's own
+  `TargetFormat` names. They are merged and unit tested, and not yet built on CI: the CI cells
+  that link and package a real app are in [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26).
+  See "What each kind of Kotlin/Native app produces" below for the status of each format.
+- A command line program is a `.kexe` (signed on macOS) or an `.exe`, with no packaging.
 - Run tasks for every output, and a Windows application that is DPI aware on a scaled display.
 - Upstream's `compose` DSL and public API are unchanged, so an existing Compose project keeps
   working. New settings are additive.
@@ -112,25 +113,32 @@ What each kind of Kotlin/Native app produces. Owner, 2026-10-05:
 | Windows | `.exe` | `.msi`, `.exe` (installer) | `.msix` |
 
 The Compose plugin extends upstream's `nativeDistributions`: the same `TargetFormat`s that
-already work on the JVM output (`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`) work for a Kotlin/Native
-window app, and the formats upstream lacks (a real `.AppImage` file, Flatpak, MSIX) are added
-in the same style.
+already work on the JVM output work for a Kotlin/Native window app, and the formats upstream
+lacks are added in the same style. Status of each, as of 2026-10-05:
 
-Velopack builds the direct distribution formats on every OS: the Windows `Setup.exe` and
-`.msi`, the macOS `.dmg` (made from the `.app` in Velopack's portable zip, because Velopack
-makes no dmg itself), and the Linux `.AppImage`. Owner, 2026-10-05:
+| Format | Status |
+|---|---|
+| `.app`, `.dmg` | merged (upstream's tasks, plus signing and notarization); not yet built on CI |
+| `.pkg` (App Store form) | merged; not yet built on CI |
+| `.deb`, `.rpm` | merged; not yet built on CI |
+| `.AppImage` | a first task is merged; the self-updating Velopack AppImage is not started |
+| `.exe` folder, `.msi` | first versions are merged; Velopack replaces them, and the Velopack change is not open yet |
+| Windows installer `.exe` (Velopack `Setup.exe`) | not open yet |
+| `.dmg` made from Velopack's portable zip | not open yet |
+| Flatpak, `.msix`, a real `.AppImage` file format | open, [#40](https://github.com/thisisthepy/compose-multiplatform-extended/pull/40) |
+| Kotlin/Native build and package cells on CI | open, [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26) |
+
+Velopack is meant to build the direct distribution formats on every OS: the Windows `Setup.exe`
+and `.msi`, the macOS `.dmg` (made from the `.app` in Velopack's portable zip, because Velopack
+makes no dmg itself), and the Linux `.AppImage`. That is the plan, not the state. Owner, 2026-10-05:
 
 > [user] "윈도우는 Velopack으로 하자. NSIS랑 wix는 너무 별로야."
 
-The plugin produces the packages and the update feed artifacts (full and delta packages and
+The plugin is to produce the packages and the update feed artifacts (full and delta packages and
 `releases.<channel>.json`). Updating an installed application is not the plugin's job:
 application developers use the Velopack SDK directly. Owner, 2026-10-05:
 
 > [user] "업데이트 sdk 때문에 그런거면 그건 우리가 커버쳐줄 부분은 아닌거같아."
-
-The `.pkg` (the Mac App Store form, built apart from the general `.pkg` Velopack makes), `.deb`
-and `.rpm` come from the plugin's own tasks. Flatpak and `.msix` are built separately. The
-state of each is in [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md).
 
 Signing. `.dmg`, `.msi` and the installer `.exe` install unsigned and are the default way to
 distribute. `.pkg` and `.msix` are store formats: they are for store submission (the store

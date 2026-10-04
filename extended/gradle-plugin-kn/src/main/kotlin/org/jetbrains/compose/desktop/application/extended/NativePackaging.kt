@@ -10,6 +10,7 @@ import org.gradle.api.Task
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
+import java.io.File
 import org.jetbrains.compose.desktop.application.dsl.NativeApplication
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.compose.desktop.application.tasks.AbstractNativeMacApplicationPackageAppDirTask
@@ -160,7 +161,13 @@ internal object MacNativePackager : NativeOsPackager {
         val dmgName = ctx.taskName("packageDmgNative")
         if (ctx.project.tasks.names.contains(dmgName)) {
             val dmg = ctx.project.tasks.named(dmgName, AbstractNativeMacApplicationPackageDmgTask::class.java)
-            dmg.configure { it.dependsOn(sign) }
+            dmg.configure { task ->
+                task.dependsOn(sign)
+                task.doLast {
+                    val dir = task.destinationDir.get().asFile
+                    NativeChecksums.write(dir, dir.listFiles().orEmpty().filter { it.name.endsWith(".dmg") })
+                }
+            }
             val notarize = ctx.register<AbstractNativeMacNotarizeTask>("notarizeDmgNative") {
                 dependsOn(dmg)
                 packageFiles.from(dmg.flatMap { it.destinationDir }.map { dir ->

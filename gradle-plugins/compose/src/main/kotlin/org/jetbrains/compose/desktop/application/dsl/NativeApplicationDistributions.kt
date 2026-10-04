@@ -23,6 +23,21 @@ abstract class NativeApplicationDistributions : AbstractDistributions() {
         super.targetFormats(*formats)
     }
 
+    val msix: NativeMsixSettings = objects.newInstance(NativeMsixSettings::class.java)
+    open fun msix(fn: Action<NativeMsixSettings>) {
+        fn.execute(msix)
+    }
+
+    val flatpak: NativeFlatpakSettings = objects.newInstance(NativeFlatpakSettings::class.java)
+    open fun flatpak(fn: Action<NativeFlatpakSettings>) {
+        fn.execute(flatpak)
+    }
+
+    val appImage: NativeAppImageSettings = objects.newInstance(NativeAppImageSettings::class.java)
+    open fun appImage(fn: Action<NativeAppImageSettings>) {
+        fn.execute(appImage)
+    }
+
     val linux: LinuxPlatformSettings = objects.newInstance(LinuxPlatformSettings::class.java)
     open fun linux(fn: Action<LinuxPlatformSettings>) {
         fn.execute(linux)

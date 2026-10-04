@@ -57,7 +57,7 @@ jobs:
       - name: Run the integration tests
         shell: bash
         working-directory: ${{ runner.os == 'Windows' && 'X:\gradle-plugins' || 'gradle-plugins' }}
-        run: ./gradlew --continue check -Pcompose.tests.gradle.versions=$GRADLE_VERSION -Pcompose.tests.agp.versions=$AGP_VERSION
+        run: ./gradlew --continue check "-Pcompose.tests.gradle.versions=$GRADLE_VERSION" "-Pcompose.tests.agp.versions=$AGP_VERSION"
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

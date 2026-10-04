@@ -241,6 +241,14 @@ internal object LinuxNativePackager : NativeOsPackager {
             destinationDir.set(ctx.outputDir("appimage"))
         }
         val packages = mutableListOf<TaskProvider<*>>(appImage)
+        val linuxName = appDir.flatMap { it.packageName }
+        packages += ctx.configureBundleFormats(
+            layoutTask = appDir,
+            linuxUsr = appDir.flatMap { it.destinationDir }.zip(linuxName) { dir, name -> dir.dir("$name.AppDir/usr") },
+            linuxExecutable = linuxName.map { "bin/$it" },
+            windowsDir = null,
+            windowsExecutable = null,
+        )
         if (TargetFormat.Deb in ctx.distributions.targetFormats) {
             packages += ctx.register<AbstractNativeLinuxDebTask>("packageDebNative") {
                 common()
@@ -296,6 +304,14 @@ internal object WindowsNativePackager : NativeOsPackager {
                 destinationDir.set(ctx.outputDir("msi"))
             }
         }
+        val windowsName = appDir.flatMap { it.packageName }
+        packages += ctx.configureBundleFormats(
+            layoutTask = appDir,
+            linuxUsr = null,
+            linuxExecutable = null,
+            windowsDir = appDir.flatMap { it.destinationDir }.zip(windowsName) { dir, name -> dir.dir(name) },
+            windowsExecutable = windowsName.map { "$it.exe" },
+        )
         if (packages.isEmpty()) packages += appDir
         registerNativeRunTasks(ctx, appDir.flatMap { it.destinationDir }.zip(appDir.flatMap { it.packageName }) { dir, name ->
             dir.asFile.resolve("$name/$name.exe")

@@ -1,0 +1,177 @@
+# Builds the AppImage, Flatpak and MSIX target formats of the extended plugin from the
+# hello-bundles sample: the AppImage and the Flatpak on Ubuntu, the MSIX on Windows. The
+# plugin is built from this checkout and published to the local Maven repository, so what is
+# packaged is the code under review. No paths filter: a required check that is skipped blocks
+# the merge. The inherited upstream workflows fail at Setup Prerequisites and are not the gate.
+name: Extended bundles
+
+on:
+  pull_request:
+    branches: [ extended ]
+  workflow_dispatch:
+
+concurrency:
+  group: extended-bundles-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: AppImage and Flatpak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'jetbrains'
+          java-version: '25'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Tools
+        run: |
+          # flatpak-builder's sandbox needs unprivileged user namespaces, which Ubuntu 24.04 restricts.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            flatpak flatpak-builder desktop-file-utils appstream dbus-daemon xvfb xauth \
+            libgl1 libegl1 libgl1-mesa-dri fontconfig squashfs-tools
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Plugin to the local repository
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+
+      - name: Build the AppImage and the Flatpak
+        working-directory: extended/gradle-plugin-kn/samples/hello-bundles
+        run: dbus-run-session -- ./gradlew --no-daemon packageAppImageFile packageFlatpak --stacktrace
+
+      - name: Check the AppImage
+        working-directory: extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries
+        run: |
+          image="$(ls main/appimage/*.AppImage)"
+          echo "AppImage: $image"
+          test -f "$image.sha256"
+          (cd "$(dirname "$image")" && sha256sum -c "$(basename "$image").sha256")
+          # A real file, not a directory: the ELF runtime followed by a squashfs image.
+          test -f "$image" && head -c 4 "$image" | grep -q ELF
+          mkdir -p inspect && cd inspect
+          APPIMAGE_EXTRACT_AND_RUN=1 "../$image" --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun
+          test -x squashfs-root/usr/bin/hello-bundles
+          desktop-file-validate squashfs-root/hello-bundles.desktop
+          cat squashfs-root/hello-bundles.desktop
+          test -f squashfs-root/hello-bundles.png
+
+      - name: The AppImage starts
+        working-directory: extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries
+        run: |
+          image="$(realpath main/appimage/*.AppImage)"
+          # Still running when the timeout ends it (exit 124) means the window came up.
+          set +e
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a -s "-screen 0 1280x800x24" timeout 25 "$image"
+          status=$?
+          set -e
+          echo "exit status $status"
+          test "$status" -eq 124
+
+      - name: Check the Flatpak
+        working-directory: extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries
+        run: |
+          bundle="$(ls main/flatpak/bundle/*.flatpak)"
+          echo "Flatpak bundle: $bundle"
+          (cd "$(dirname "$bundle")" && sha256sum -c "$(basename "$bundle").sha256")
+          manifest="$(ls main/flatpak/manifest/*.json | head -1)"
+          cat "$manifest"
+          appstreamcli validate --no-net --explain main/flatpak/manifest/packaging/*.metainfo.xml
+          desktop-file-validate main/flatpak/manifest/packaging/*.desktop
+          dbus-run-session -- bash -c '
+            set -e
+            flatpak --user install --noninteractive --bundle "'"$bundle"'"
+            flatpak --user info io.github.thisisthepy.HelloBundles
+            flatpak run --command=sh io.github.thisisthepy.HelloBundles -c "test -x /app/bin/hello-bundles && test -x /app/lib/hello-bundles/bin/hello-bundles"
+            set +e
+            xvfb-run -a -s "-screen 0 1280x800x24" timeout 40 flatpak run io.github.thisisthepy.HelloBundles
+            status=$?
+            echo "exit status $status"
+            test "$status" -eq 124
+          '
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-bundles
+          path: |
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/appimage/
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/flatpak/bundle/
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/flatpak/manifest/*.json
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/flatpak/manifest/packaging/
+          if-no-files-found: ignore
+
+  windows:
+    name: MSIX
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'jetbrains'
+          java-version: '25'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Plugin to the local repository
+        working-directory: gradle-plugins
+        shell: bash
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+
+      - name: Build the MSIX and run the certification kit
+        working-directory: extended/gradle-plugin-kn/samples/hello-bundles
+        shell: bash
+        run: ./gradlew --no-daemon packageMsix certifyMsix --stacktrace
+
+      - name: Check the MSIX
+        working-directory: extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/msix
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem -Filter *.msix | Select-Object -First 1
+          Write-Host "MSIX: $($msix.Name) ($($msix.Length) bytes)"
+          # The recorded checksum is the file's.
+          $recorded = (Get-Content "$($msix.Name).sha256").Split(' ')[0]
+          $actual = (Get-FileHash $msix.FullName -Algorithm SHA256).Hash.ToLower()
+          if ($recorded -ne $actual) { throw "checksum $recorded recorded, file is $actual" }
+          # A package is a zip with the manifest, the images and the executable at its root.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($msix.FullName)
+          $names = $zip.Entries | ForEach-Object { $_.FullName }
+          $zip.Dispose()
+          foreach ($required in @('AppxManifest.xml', 'hello-bundles.exe', 'Assets/StoreLogo.png', 'Assets/Square44x44Logo.png', 'Assets/Square150x150Logo.png', 'Assets/Wide310x150Logo.png')) {
+            if ($names -notcontains $required) { throw "the package has no $required" }
+          }
+          $manifest = Get-Content layout/AppxManifest.xml -Raw
+          Write-Host $manifest
+          if ($manifest -notmatch 'Version="1\.0\.0\.0"') { throw 'the package version is not 1.0.0.0' }
+          Get-Content INSTALL-msix.txt
+          if (Test-Path ../../../reports/msix-wack-report.xml) { Write-Host 'The certification kit ran.' } else { Write-Host 'The certification kit was not available on this runner.' }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-msix
+          path: |
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/msix/*.msix
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/msix/*.sha256
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/msix/INSTALL-msix.txt
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/reports/msix-wack-report.xml
+            extended/gradle-plugin-kn/samples/hello-bundles/build/compose/binaries/main/msix/layout/AppxManifest.xml
+          if-no-files-found: ignore

@@ -5,6 +5,7 @@
 
 package org.jetbrains.compose.desktop.application.tasks
 
+import org.jetbrains.compose.desktop.application.extended.WindowsAppManifest
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -314,9 +315,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         checkRuntimeHelpers(skiaArchives + skikoArchive, listOf(cxxRuntime, msvcLibrary("libvcruntime.lib")))
         // Without a manifest a process is DPI unaware, and Windows stretches its 96 DPI
         // drawing to a scaled display, which blurs the text. This is what java.exe declares.
-        val manifest = windowsManifest.orNull?.asFile
-            ?: workDir.resolve("windows-app.manifest")
-                .apply { writeText(resourceText("windows-app.manifest")) }
+        val manifest = WindowsAppManifest.resolve(windowsManifest.orNull?.asFile, workDir)
         linker("/MANIFEST:EMBED", "/MANIFESTINPUT:${manifest.absolutePath}")
         // No opengl32.lib: skiko defines the few OpenGL entry points it calls itself and
         // resolves them from opengl32.dll at run time, so the import library defines them twice.

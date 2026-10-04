@@ -52,7 +52,8 @@ jobs:
       - name: Shorten the workspace path on Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: subst X: "$env:GITHUB_WORKSPACE"
+        run: |
+          subst X: "$env:GITHUB_WORKSPACE"
       - name: Run the integration tests
         shell: bash
         working-directory: ${{ runner.os == 'Windows' && 'X:\gradle-plugins' || 'gradle-plugins' }}

@@ -140,6 +140,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
         workDir.deleteRecursively()
         workDir.mkdirs()
+        if (!awt) checkSkikoNeedsNoJawt(skikoArchive)
         val supportJar = buildSupportJar(graalvm)
 
         val output = destinationDir.get().asFile
@@ -456,6 +457,26 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
                 workDir.resolve("$name.log"),
             )
             obj
+        }
+    }
+
+    /**
+     * An AWT-free image has no JAWT to link, so a skiko archive that still calls `JAWT_GetAWT`
+     * fails the link on a symbol that says nothing about the cause. Say it before the build.
+     */
+    private fun checkSkikoNeedsNoJawt(skikoArchive: File) {
+        val listing = workDir.resolve("${skikoArchive.name}-undefined-jawt.txt")
+        if (currentOS == OS.Windows) {
+            run(listOf("dumpbin.exe", "/nologo", "/symbols", skikoArchive.absolutePath), listing, quiet = true)
+        } else {
+            run(listOf("nm", "-u", skikoArchive.absolutePath), listing, quiet = true)
+        }
+        if (listing.useLines { lines -> lines.any { "JAWT_GetAWT" in it && (currentOS != OS.Windows || "UNDEF" in it) } }) {
+            throw GradleException(
+                "$skikoArchive was built for an AWT window: it refers to JAWT_GetAWT, which an AWT-free application does not have. " +
+                    "Build the archive with `build-skiko-static-jvm.sh --no-jawt <work-dir>` from compose-multiplatform-core-extended, " +
+                    "or set windowing = ApplicationWindowing.Awt to keep AWT."
+            )
         }
     }
 

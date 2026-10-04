@@ -53,6 +53,18 @@ jobs:
             bash extended/native-image/check-native-config.sh core-extended
           fi
 
+  plugin-dsl:
+    name: Plugin DSL additive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Upstream DSL gains declarations and loses none
+        run: bash extended/native-image/check-plugin-dsl-additive.sh origin/jb-main
+
   package:
     name: Package (${{ matrix.name }})
     strategy:
@@ -65,6 +77,9 @@ jobs:
           - name: linux-x64
             os: ubuntu-24.04
             nik: linux-amd64
+          # Kotlin/Native packaging cells go here. Each one runs check-native-config.sh (already
+          # scans extended/window/native) and, after linking, `nm` on the executable for
+          # Objective-C or class-name lookups; see the K/N section of the plugin change list.
           # Kotlin/Native packaging cells go here. The K/N window agent adds them: one per
           # platform, building the native window modules into an executable and starting it.
     runs-on: ${{ matrix.os }}

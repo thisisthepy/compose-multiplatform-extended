@@ -4,21 +4,26 @@ The Gradle plugin packages a Kotlin/Native desktop executable the way it package
 application: from the metadata in `nativeDistributions` (name, version, vendor, icons,
 resources), with upstream's own `TargetFormat` names. What a window (Compose) app makes:
 
-| OS | App | Package (`targetFormats`) | Store package |
+| OS | App | Direct distribution | Store or distribution package |
 | --- | --- | --- | --- |
-| macOS | `.app` | `Dmg` | `Pkg` |
-| Linux | `.AppImage` | `Deb`, `Rpm` | Flatpak (not yet, see below) |
-| Windows | `.exe` | `Msi` (under decision), installer `.exe` (Velopack, not yet) | `.msix` (not yet) |
+| macOS | `.app` | `.dmg` (Velopack) | `.pkg` (`Pkg`, this module) |
+| Linux | `.AppImage` (Velopack) | `.deb`, `.rpm` (`Deb`, `Rpm`, this module) | Flatpak |
+| Windows | `.exe` | `Setup.exe` and `.msi` (Velopack) | `.msix` |
+
+This module builds `Pkg` (the Mac App Store form, built separately from the general `.pkg` that
+`vpk` makes), `Deb` and `Rpm`, and the command line outputs. Velopack builds the direct
+distribution formats (`.dmg`, AppImage, `Setup.exe`, `.msi`) and their update feeds, and
+Flatpak and MSIX are built separately. Updating an installed application is the application's
+own business: it uses the Velopack SDK directly, and the plugin produces the packages and the
+feed artifacts.
 
 A command line program (`appKind = Cli`) is not packaged: it makes the bare executable, `.kexe`
 on macOS and Linux and `.exe` on Windows, signed on macOS. The upstream JVM packaging is
 untouched.
 
-`.dmg` and the Linux and Windows installers install unsigned, and are the default way to
-distribute. `.pkg` and `.msix` are store formats: they are documented for store submission
-(re-signing by the store) or for when a certificate exists. A real `.AppImage` file beyond
-what `packageAppImageNative` makes, Flatpak, MSIX and the Velopack installer are being built
-separately. The `.msi` (WiX) is on hold while the owner decides.
+`.pkg` and `.msix` are store formats: they are for store submission (the store re-signs) or for
+when a certificate exists. `.pkg` expects `macOS { appStore = true }`, a sandbox entitlements
+file (`macOS { entitlementsFile }`) and the "3rd Party Mac Developer" certificates.
 
 The code lives here, `extended/gradle-plugin-kn/`, and is compiled into the plugin
 (`gradle-plugins/compose/build.gradle.kts` adds this directory as a source root). The upstream
@@ -32,15 +37,15 @@ Names end in the build type and the target, for example `...ReleaseMacosArm64`.
 | Task | OS | Result |
 | --- | --- | --- |
 | `createDistributableNative...` | window app | the runnable layout: `.app`, `.AppDir` or the exe folder |
-| `signDistributableNative...` | macOS | signs the `.app` (Developer ID, or ad hoc without an identity, with Gatekeeper instructions beside it) |
-| `packageDmgNative...` | macOS | `.dmg` (when `Dmg` is listed), with `checksums.sha256` |
-| `packagePkgNative...` | macOS | `.pkg` through `productbuild` (when `Pkg` is listed), signed with the installer certificate of the same identity; `macOS { appStore = true }` for the Mac App Store |
+| `signDistributableNative...` | macOS | signs the `.app` (Developer ID, or ad hoc without an identity) |
+| `packageDmgNative...` | macOS | `.dmg` (when `Dmg` is listed), upstream's task |
+| `packagePkgNative...` | macOS | the Mac App Store `.pkg` through `productbuild` (when `Pkg` is listed), signed with the installer certificate of the same identity |
 | `notarizeDmgNative...` | macOS | notarizes and staples the dmg; skips with a message when credentials are absent |
 | `lipoNative<Build>` | macOS | one universal executable, when `macOS { universalBinary = true }` and both targets exist |
 | `packageAppImageNative...` | Linux | `.AppImage` through `appimagetool` |
 | `packageDebNative...` | Linux | `.deb` through `dpkg-deb` (when `Deb` is listed) |
 | `packageRpmNative...` | Linux | `.rpm` through `rpmbuild` (when `Rpm` is listed) |
-| `packageExeNative...`, `packageMsiNative...` | Windows | the folder as a `.zip`, and an `.msi` through WiX 3 (as of the first version; both are being reworked) |
+| `packageExeNative...`, `packageMsiNative...` | Windows | first versions (a `.zip` of the folder, and an `.msi` through WiX 3), replaced by the Velopack outputs |
 | `createExecutableNative...` | command line | `<name>.kexe`, or `<name>.exe` on Windows |
 | `signExecutableNative...` | command line, macOS | keeps the linker's ad hoc signature while it verifies and signs ad hoc again when it does not; signs with the Developer ID identity when one is configured |
 | `notarizeExecutableNative...` | command line, macOS | optional: submits a zip of the `.kexe` (a bare file cannot be stapled); skips without credentials |

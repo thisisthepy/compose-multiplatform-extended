@@ -227,11 +227,4 @@ class NativePackageFilesTest {
             dir.deleteRecursively()
         }
     }
-
-    @Test
-    fun theGatekeeperNoteSaysHowToOpenABlockedApp() {
-        val notes = InstallNotes.macGatekeeper("Ember")
-        assertTrue("Open Anyway" in notes)
-        assertTrue("xattr -dr com.apple.quarantine \"/Applications/Ember.app\"" in notes, notes)
-    }
 }

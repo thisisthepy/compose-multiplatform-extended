@@ -81,8 +81,6 @@ abstract class AbstractNativeMacSignTask : AbstractComposeDesktopTask() {
             )
         } else {
             logger.lifecycle("No signing identity is set: signing ${app.name} ad hoc")
-            // Next to the app, so it goes into the disk image: how to open a copy Gatekeeper blocks.
-            appDir.ioFile.resolve("If macOS will not open the app.txt").writeText(InstallNotes.macGatekeeper(packageName.get()))
             NoCertificateSigner(runExternalTool)
         }
         val entitlementsFile = entitlements.orNull?.let(::File)

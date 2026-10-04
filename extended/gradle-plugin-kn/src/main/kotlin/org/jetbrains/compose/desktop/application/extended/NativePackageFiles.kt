@@ -294,37 +294,3 @@ internal object NativeChecksums {
         out.writeText(render(files.filter { it.isFile }.associate { it.relativeTo(dir).invariantSeparatorsPath to sha256(it) }))
     }
 }
-
-/** The text that ships beside an ad hoc signed app, so a person can open it. */
-internal object InstallNotes {
-    fun macGatekeeper(appName: String): String = """
-If macOS will not open the app
-==============================
-
-This app is signed, but not by a developer Apple has verified, so the first time you open
-a copy you downloaded, macOS asks you to confirm. You do this once. After that the app
-opens normally.
-
-First drag the app into Applications.
-
-macOS 15 (Sequoia) and newer
-----------------------------
-1. Open the app. macOS says it could not verify the app and does not open it. Click Done.
-2. Open System Settings, choose Privacy & Security, and scroll down to Security.
-   Next to the line saying the app was blocked, click Open Anyway.
-   The button is there for about an hour after step 1; if it is gone, repeat step 1.
-3. Click Open Anyway again in the dialog that follows, and enter your login password.
-
-macOS 14 (Sonoma) and older
----------------------------
-Control-click (or right-click) the app in Applications, choose Open, then click Open in
-the dialog.
-
-Any version, from Terminal
---------------------------
-    xattr -dr com.apple.quarantine "/Applications/$appName.app"
-
-This removes the mark your browser put on the download. Only do this for an app you
-downloaded from a source you trust.
-""".trimStart()
-}

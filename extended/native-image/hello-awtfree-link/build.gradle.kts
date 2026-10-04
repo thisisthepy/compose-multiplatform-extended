@@ -32,3 +32,7 @@ compose.desktop.application {
         providers.environmentVariable("SKIKO_STATIC").orNull?.let { skikoStaticDirectory.set(file(it)) }
     }
 }
+
+// The window modules are built with a newer Kotlin than this sample; they use nothing the
+// older metadata reader cannot follow, so the version check is skipped.
+kotlin.compilerOptions.freeCompilerArgs.add("-Xskip-metadata-version-check")

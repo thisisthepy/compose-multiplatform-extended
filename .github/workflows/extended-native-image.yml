@@ -270,7 +270,7 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a timeout 120 ./app | tee out.txt
           else
-            timeout 120 ./app | tee out.txt
+            perl -e 'alarm 120; exec @ARGV' ./app | tee out.txt
           fi
           grep -q "link check ok" out.txt
 

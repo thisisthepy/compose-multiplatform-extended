@@ -1,0 +1,41 @@
+/*
+ * Copyright 2026 thisisthepy and respective authors and developers.
+ * Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE.txt file.
+ */
+
+package org.jetbrains.compose.nativeimage;
+
+import com.oracle.svm.core.annotate.Substitute;
+import com.oracle.svm.core.annotate.TargetClass;
+import java.util.function.BooleanSupplier;
+
+/**
+ * Cuts the places where a library Compose draws with reaches AWT by a call that never runs
+ * in an application with no AWT window. native-image follows every call it can see, so a
+ * branch that is dead at run time still makes java.awt part of the image.
+ */
+final class AwtFreeSubstitutions {
+
+    private AwtFreeSubstitutions() {
+    }
+
+    /** True when the build links no AWT, which is when these apply. */
+    static final class AwtFree implements BooleanSupplier {
+        @Override
+        public boolean getAsBoolean() {
+            return Boolean.getBoolean("compose.nativeimage.awtFree");
+        }
+    }
+}
+
+/**
+ * skiko's initialisation sets the platform look and feel through Swing when
+ * {@code skiko.rendering.laf.global} is set. The call is reached from every load of Skia and
+ * pulls in Swing's UIManager, the toolkit and the whole of Swing behind it.
+ */
+@TargetClass(className = "org.jetbrains.skiko.Actuals_awtKt", onlyWith = AwtFreeSubstitutions.AwtFree.class)
+final class Target_org_jetbrains_skiko_Actuals_awtKt {
+    @Substitute
+    public static void setSystemLookAndFeel() {
+    }
+}

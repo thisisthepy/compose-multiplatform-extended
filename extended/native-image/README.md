@@ -121,6 +121,11 @@ ahead of `C:\Windows\System32` on PATH before running it: `vcvars64.bat` prepend
 where `bash` is WSL's launcher rather than an interpreter, and a nested script invoked as
 `bash` would run under WSL and fail.
 
+Visual Studio's own clang-cl works too, from the "C++ Clang Compiler for Windows" component,
+under `VC\Tools\Llvm\x64\bin`; a C++ workload does not install it by default. Keep MSVC's
+`cl`, `link`, `lib` and `dumpbin` ahead of clang-cl on PATH, the way CI pairs an MSVC
+environment with a separate LLVM.
+
 ## Not yet
 
 - Windows on a real display: the probe renders off screen, and opening a window by hand is

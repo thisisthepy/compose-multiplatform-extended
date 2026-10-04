@@ -8,11 +8,13 @@ package org.jetbrains.compose.desktop.application.tasks
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputDirectory
@@ -78,6 +80,12 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
 
     @get:Input
     abstract val buildArgs: ListProperty<String>
+
+    /** Windows only: an application manifest to embed instead of the plugin's own. */
+    @get:InputFile
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val windowsManifest: RegularFileProperty
 
     @get:OutputDirectory
     abstract val destinationDir: DirectoryProperty
@@ -286,7 +294,15 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         // adds libraries of its own built against the DLL runtime (sunmscapi.lib) that cannot
         // be rewritten here, so it is the C++ library's copy that loses its guard instead.
         linker("/NODEFAULTLIB:vcruntime.lib", "libvcruntime.lib", "/NODEFAULTLIB:msvcprt.lib", "/NODEFAULTLIB:libcpmt.lib")
-        linker(rewritten(msvcLibrary("libcpmt.lib"), into = "msvc").absolutePath)
+        val cxxRuntime = rewritten(msvcLibrary("libcpmt.lib"), into = "msvc")
+        linker(cxxRuntime.absolutePath)
+        checkRuntimeHelpers(skiaArchives + skikoArchive, listOf(cxxRuntime, msvcLibrary("libvcruntime.lib")))
+        // Without a manifest a process is DPI unaware, and Windows stretches its 96 DPI
+        // drawing to a scaled display, which blurs the text. This is what java.exe declares.
+        val manifest = windowsManifest.orNull?.asFile
+            ?: workDir.resolve("windows-app.manifest")
+                .apply { writeText(resourceText("windows-app.manifest")) }
+        linker("/MANIFEST:EMBED", "/MANIFESTINPUT:${manifest.absolutePath}")
         // No opengl32.lib: skiko defines the few OpenGL entry points it calls itself and
         // resolves them from opengl32.dll at run time, so the import library defines them twice.
         return linked to link
@@ -297,6 +313,34 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         (System.getenv("LIB") ?: "").split(';').filter { it.isNotBlank() }
             .map { File(it, name) }.firstOrNull { it.isFile }
             ?: error("$name is not in any directory on LIB; run from a Developer prompt or after vcvars64.bat")
+
+    /**
+     * Stops before the link when the MSVC C and C++ runtimes are older than the toolset Skia
+     * was built with. Skia's archives call the runtime's vectorised algorithm helpers, and a
+     * helper added after this toolset is simply not there: the link then fails on a bare
+     * `__std_*` name that says nothing about what to do. The one seen was
+     * `__std_find_first_of_trivial_pos_1`, in 14.51 but not in 14.43.
+     *
+     * Both runtime archives are read, not only the C++ one: the type_info helpers Skia also
+     * calls live in libvcruntime, so libcpmt alone reports them missing on a toolset that links.
+     */
+    private fun checkRuntimeHelpers(referencing: List<File>, runtimes: List<File>) {
+        val referenced = referencing.flatMapTo(mutableSetOf()) { undefinedRuntimeHelpers(it) }
+        val defined = runtimes.flatMapTo(mutableSetOf()) { definedSymbols(it) }
+        val missing = missingRuntimeHelpers(referenced, defined)
+        if (missing.isNotEmpty()) throw GradleException(runtimeHelpersMessage(missing, runtimes))
+    }
+
+    /** The `__std_*` runtime helpers an archive calls without defining them itself. */
+    private fun undefinedRuntimeHelpers(archive: File): Set<String> {
+        val listing = workDir.resolve("${archive.name}-undefined.txt")
+        run(listOf("dumpbin.exe", "/nologo", "/symbols", archive.absolutePath), listing, quiet = true)
+        return listing.useLines { lines ->
+            lines.filter { "UNDEF" in it }
+                .flatMap { line -> RUNTIME_HELPER.findAll(line).map { it.value } }
+                .toSet()
+        }
+    }
 
     /**
      * The same bytes with the C runtime directives blanked to spaces: the `RuntimeLibrary`
@@ -494,6 +538,26 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         else argument
 
     internal companion object {
+        /** The MSVC runtime's vectorised algorithm and type_info helpers, by name. */
+        val RUNTIME_HELPER = Regex("__std_[A-Za-z0-9_]+")
+
+        /** Which of the helpers the archives call no runtime being linked defines. */
+        fun missingRuntimeHelpers(referenced: Set<String>, defined: Set<String>): List<String> =
+            referenced.filter { it !in defined }.sorted()
+
+        /** What to tell someone whose toolset is too old, naming it and what is missing. */
+        fun runtimeHelpersMessage(missing: List<String>, runtimes: List<File>): String =
+            buildString {
+                appendLine("The MSVC toolset is older than the one Skia was built with.")
+                appendLine("Update the Visual Studio C++ toolset, then build again.")
+                appendLine()
+                appendLine("Runtime libraries read:")
+                runtimes.forEach { appendLine("    " + it.absolutePath) }
+                appendLine()
+                appendLine("Helpers Skia calls that none of them define:")
+                missing.forEach { appendLine("    " + it) }
+            }
+
         /** The JNI short name mangling: '/' is '_', and '_', ';', '[' and non-ASCII are escaped. */
         fun jniMangle(name: String): String = buildString {
             for (char in name) {

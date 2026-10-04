@@ -233,6 +233,13 @@ jobs:
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
+      - name: Which native-image options name the main thread
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          "$GRAALVM_HOME/bin/native-image" --expert-options-all 2>&1 | grep -i -B1 -A3 "NewThread\|FirstThread\|MainThread" || echo "none"
+          grep -n "RunMainInNewThread" extended/native-image/hello-awtfree-link/build/tmp/packageNativeImage/native-image.args || echo "not in the argument file"
+
       - name: Start the AwtFree link sample
         working-directory: extended/native-image/hello-awtfree-link
         shell: bash

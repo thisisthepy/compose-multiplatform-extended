@@ -183,6 +183,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         // allows a command line through native-image's .cmd launcher.
         val argFile = workDir.resolve("native-image.args")
         argFile.writeText(args.drop(1).joinToString("\n") { quoteArgument(it) })
+        logger.info("native-image arguments:\n" + args.drop(1).joinToString("\n"))
         run(listOf(args.first(), "@${argFile.absolutePath}"), workDir.resolve("native-image.log"))
         if (platform == Platform.LinuxX64) removeUnneededLinuxLibraries(output)
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")

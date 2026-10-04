@@ -58,7 +58,16 @@ abstract class AbstractMacOSPlatformSettings : AbstractPlatformSettings() {
 }
 
 abstract class NativeApplicationMacOSPlatformSettings : AbstractMacOSPlatformSettings() {
+    /** Also make one executable that runs on both Apple Silicon and Intel, when both targets are declared. */
+    var universalBinary: Boolean = false
 
+    /** Replaces the entitlements the plugin signs with. */
+    val entitlementsFile: RegularFileProperty = objects.fileProperty()
+
+    internal val infoPlistSettings = InfoPlistSettings()
+    fun infoPlist(fn: Action<InfoPlistSettings>) {
+        fn.execute(infoPlistSettings)
+    }
 }
 
 abstract class JvmMacOSPlatformSettings : AbstractMacOSPlatformSettings() {

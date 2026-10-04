@@ -89,88 +89,26 @@ internal object LinuxDesktopEntry {
     }
 }
 
-/** The control file of a Debian package. */
-internal object DebControl {
-    fun render(
-        packageName: String,
-        version: String,
-        architecture: String,
-        maintainer: String,
-        description: String,
-        installedSizeKb: Long,
-        section: String = "utils",
-        depends: List<String> = emptyList(),
-    ): String = buildString {
-        appendLine("Package: ${debianPackageName(packageName)}")
-        appendLine("Version: $version")
-        appendLine("Section: $section")
-        appendLine("Priority: optional")
-        appendLine("Architecture: $architecture")
-        if (depends.isNotEmpty()) appendLine("Depends: ${depends.joinToString(", ")}")
-        appendLine("Installed-Size: $installedSizeKb")
-        appendLine("Maintainer: $maintainer")
-        val lines = description.lines().filter { it.isNotBlank() }.ifEmpty { listOf(packageName) }
-        appendLine("Description: ${lines.first()}")
-        lines.drop(1).forEach { appendLine(" $it") }
+/** What a Kotlin/Native executable is called, per operating system, and what a signature needs. */
+internal object NativeCliOutput {
+    /** `.kexe` on macOS and Linux, `.exe` on Windows. */
+    fun fileName(name: String, windows: Boolean): String = if (windows) "$name.exe" else "$name.kexe"
+
+    enum class MacSigning { DeveloperId, KeepLinkerSignature, ReSignAdHoc }
+
+    /**
+     * What to do with a linked macOS executable. A Developer ID identity always signs. Without
+     * one the linker's own ad hoc signature is kept as long as it still verifies, and a
+     * post-link edit that broke it is signed ad hoc again.
+     */
+    fun macSigning(hasIdentity: Boolean, linkerSignatureValid: Boolean): MacSigning = when {
+        hasIdentity -> MacSigning.DeveloperId
+        linkerSignatureValid -> MacSigning.KeepLinkerSignature
+        else -> MacSigning.ReSignAdHoc
     }
 
-    /** Debian package names are lower case letters, digits, plus, minus and period. */
-    fun debianPackageName(name: String): String =
-        name.lowercase().replace(Regex("[^a-z0-9+.-]"), "-").trim('-').ifEmpty { "app" }
-
-    fun architecture(konanTargetName: String): String = when {
-        konanTargetName.contains("arm64", ignoreCase = true) -> "arm64"
-        else -> "amd64"
-    }
-}
-
-/** The Windows Installer source for a Kotlin/Native application folder. */
-internal object WindowsInstallerSource {
-    /** A stable GUID derived from [seed], so the same application keeps its upgrade code. */
-    fun guid(seed: String): String =
-        java.util.UUID.nameUUIDFromBytes(seed.toByteArray()).toString().uppercase()
-
-    fun render(
-        productName: String,
-        version: String,
-        manufacturer: String,
-        exeName: String,
-        upgradeCode: String,
-        perUser: Boolean,
-        shortcut: Boolean,
-        files: List<String>,
-    ): String {
-        fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
-        val scope = if (perUser) "perUser" else "perMachine"
-        val folder = if (perUser) "LocalAppDataFolder" else "ProgramFilesFolder"
-        return buildString {
-            appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
-            appendLine("""<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">""")
-            appendLine("""  <Product Id="*" Name="${esc(productName)}" Language="1033" Version="$version" Manufacturer="${esc(manufacturer)}" UpgradeCode="$upgradeCode">""")
-            appendLine("""    <Package InstallerVersion="500" Compressed="yes" InstallScope="$scope" />""")
-            appendLine("""    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />""")
-            appendLine("""    <MediaTemplate EmbedCab="yes" />""")
-            appendLine("""    <Directory Id="TARGETDIR" Name="SourceDir">""")
-            appendLine("""      <Directory Id="$folder">""")
-            appendLine("""        <Directory Id="INSTALLFOLDER" Name="${esc(productName)}" />""")
-            appendLine("""      </Directory>""")
-            if (shortcut) appendLine("""      <Directory Id="ProgramMenuFolder" />""")
-            appendLine("""    </Directory>""")
-            appendLine("""    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">""")
-            files.forEachIndexed { index, file ->
-                appendLine("""      <Component Id="c$index" Guid="${guid("$upgradeCode/$file")}">""")
-                appendLine("""        <File Id="f$index" Source="SourceDir\${esc(file.replace('/', '\\'))}" KeyPath="yes" />""")
-                if (file == exeName && shortcut) {
-                    appendLine("""        <Shortcut Id="s$index" Directory="ProgramMenuFolder" Name="${esc(productName)}" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />""")
-                }
-                appendLine("""      </Component>""")
-            }
-            appendLine("""    </ComponentGroup>""")
-            appendLine("""    <Feature Id="Main" Level="1"><ComponentGroupRef Id="AppFiles" /></Feature>""")
-            appendLine("""  </Product>""")
-            appendLine("""</Wix>""")
-        }
-    }
+    fun architecture(konanTargetName: String): String =
+        if (konanTargetName.contains("arm64", ignoreCase = true)) "arm64" else "amd64"
 }
 
 /** What notarization needs, and the one line that says why it is skipped. */

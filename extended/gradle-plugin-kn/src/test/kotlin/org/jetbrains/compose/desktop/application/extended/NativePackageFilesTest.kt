@@ -96,49 +96,28 @@ class NativePackageFilesTest {
     }
 
     @Test
-    fun debControlHasTheMandatoryFields() {
-        val control = DebControl.render(
-            packageName = "Hello App",
-            version = "1.2.3",
-            architecture = "amd64",
-            maintainer = "Jo <jo@example.org>",
-            description = "A greeting.\nMore detail.",
-            installedSizeKb = 1234,
-            depends = listOf("libc6", "libx11-6"),
-        )
-        val lines = control.lines()
-        for (line in listOf(
-            "Package: hello-app", "Version: 1.2.3", "Architecture: amd64", "Maintainer: Jo <jo@example.org>",
-            "Installed-Size: 1234", "Depends: libc6, libx11-6", "Description: A greeting.", " More detail.",
-        )) {
-            assertTrue(line in lines, control)
+    fun cliExecutablesAreKexeOnMacAndLinuxAndExeOnWindows() {
+        assertEquals("tool.kexe", NativeCliOutput.fileName("tool", windows = false))
+        assertEquals("tool.exe", NativeCliOutput.fileName("tool", windows = true))
+    }
+
+    @Test
+    fun aDeveloperIdIdentityAlwaysSignsTheKexe() {
+        for (valid in listOf(true, false)) {
+            assertEquals(NativeCliOutput.MacSigning.DeveloperId, NativeCliOutput.macSigning(true, valid))
         }
-        assertTrue(control.endsWith("\n"), "a control file ends with a newline")
     }
 
     @Test
-    fun debArchitectureFollowsTheTarget() {
-        assertEquals("arm64", DebControl.architecture("linuxArm64"))
-        assertEquals("amd64", DebControl.architecture("linuxX64"))
+    fun theLinkerSignatureIsKeptWhileItVerifiesAndReSignedWhenItDoesNot() {
+        assertEquals(NativeCliOutput.MacSigning.KeepLinkerSignature, NativeCliOutput.macSigning(false, true))
+        assertEquals(NativeCliOutput.MacSigning.ReSignAdHoc, NativeCliOutput.macSigning(false, false))
     }
 
     @Test
-    fun msiSourceIsWellFormedAndListsEveryFile() {
-        val wxs = WindowsInstallerSource.render(
-            productName = "Hello & Co",
-            version = "1.2.3",
-            manufacturer = "Example",
-            exeName = "Hello.exe",
-            upgradeCode = WindowsInstallerSource.guid("Hello"),
-            perUser = false,
-            shortcut = true,
-            files = listOf("Hello.exe", "compose-resources/a.png"),
-        )
-        DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(wxs.byteInputStream())
-        assertTrue("Hello &amp; Co" in wxs, wxs)
-        assertTrue("""Source="SourceDir\compose-resources\a.png"""" in wxs, wxs)
-        assertTrue("<Shortcut" in wxs, wxs)
-        assertEquals(WindowsInstallerSource.guid("Hello"), WindowsInstallerSource.guid("Hello"))
+    fun appImageArchitectureFollowsTheTarget() {
+        assertEquals("arm64", NativeCliOutput.architecture("linuxArm64"))
+        assertEquals("amd64", NativeCliOutput.architecture("linuxX64"))
     }
 
     @Test

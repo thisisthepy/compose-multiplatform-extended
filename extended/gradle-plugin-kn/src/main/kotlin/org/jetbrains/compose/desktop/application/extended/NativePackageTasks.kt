@@ -106,6 +106,14 @@ abstract class AbstractNativeMacNotarizeTask : AbstractComposeDesktopTask() {
     @get:Internal
     internal var notarizationSettings: MacOSNotarizationSettings? = null
 
+    /** Staple the ticket to the file. A bare executable cannot carry one, so it is not stapled. */
+    @get:Input
+    val staple: Property<Boolean> = objects.property<Boolean>().value(true)
+
+    /** Submit a zip of the file, which is what Apple accepts for an executable that is not a disk image or a package. */
+    @get:Input
+    val zipBeforeSubmit: Property<Boolean> = objects.property<Boolean>().value(false)
+
     @TaskAction
     fun run() {
         val settings = notarizationSettings
@@ -118,17 +126,27 @@ abstract class AbstractNativeMacNotarizeTask : AbstractComposeDesktopTask() {
         }
         val validated = settings.validate()
         for (file in packageFiles.files.filter { it.isFile }) {
+            val submitted = if (zipBeforeSubmit.get()) {
+                project.layout.buildDirectory.file("compose/tmp/$name/${file.name}.zip").get().asFile.also {
+                    it.parentFile.mkdirs()
+                    it.delete()
+                    runExternalTool(
+                        File("/usr/bin/ditto"),
+                        listOf("-c", "-k", "--keepParent", file.absolutePath, it.absolutePath)
+                    )
+                }
+            } else file
             runExternalTool(
                 tool = MacUtils.xcrun,
                 args = listOf(
                     "notarytool", "submit", "--wait",
                     "--apple-id", validated.appleID,
                     "--team-id", validated.teamID,
-                    file.absolutePath
+                    submitted.absolutePath
                 ),
                 stdinStr = validated.password
             )
-            runExternalTool(MacUtils.xcrun, listOf("stapler", "staple", file.absolutePath))
+            if (staple.get()) runExternalTool(MacUtils.xcrun, listOf("stapler", "staple", file.absolutePath))
         }
     }
 }
@@ -152,6 +170,75 @@ abstract class AbstractNativeMacLipoTask : AbstractComposeDesktopTask() {
             listOf("-create", "-output", output.absolutePath) + executables.files.map { it.absolutePath }
         )
         output.makeExecutable()
+    }
+}
+
+// endregion
+
+// region CLI executables
+
+/**
+ * Copies the linked executable to `<name>.kexe` (`<name>.exe` on Windows). There is no
+ * packaging: the executable is the output. Nothing is changed in it, so the linker's own
+ * signature on macOS stays valid.
+ */
+@DisableCachingByDefault(because = "Copies one file")
+abstract class AbstractNativeCliExecutableTask : AbstractComposeDesktopTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.ABSOLUTE)
+    val executable: RegularFileProperty = objects.fileProperty()
+
+    @get:Input
+    val outputName: Property<String> = objects.property()
+
+    @get:OutputFile
+    val outputFile: RegularFileProperty = objects.fileProperty()
+
+    @TaskAction
+    fun run() {
+        val out = outputFile.ioFile
+        out.parentFile.mkdirs()
+        executable.ioFile.copyTo(out, overwrite = true)
+        out.makeExecutable()
+        logger.lifecycle("The executable is written to ${out.canonicalPath}")
+    }
+}
+
+/**
+ * Signs a macOS `.kexe`. A Developer ID identity signs it with the hardened runtime. Without
+ * one the linker's ad hoc signature is kept while it verifies, and the file is signed ad hoc
+ * again when it no longer does (after a post-link edit).
+ */
+@DisableCachingByDefault(because = "Signs with a keychain identity of the local machine")
+abstract class AbstractNativeMacKexeSignTask : AbstractComposeDesktopTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.ABSOLUTE)
+    val kexe: RegularFileProperty = objects.fileProperty()
+
+    @get:Input
+    val bundleID: Property<String> = objects.property()
+
+    @get:Internal
+    internal var signingSettings: MacOSSigningSettings? = null
+
+    @TaskAction
+    fun run() {
+        val file = kexe.ioFile
+        val settings = signingSettings
+        val hasIdentity = settings != null && !settings.identity.orNull.isNullOrEmpty()
+        val valid = runExternalTool(
+            MacUtils.codesign, listOf("--verify", "--strict", file.absolutePath), checkExitCodeIsNormal = false
+        ).exitValue == 0
+        when (NativeCliOutput.macSigning(hasIdentity, valid)) {
+            NativeCliOutput.MacSigning.DeveloperId ->
+                MacSignerImpl(settings!!.validate(bundleID, project, project.provider { false }), runExternalTool).sign(file)
+            NativeCliOutput.MacSigning.KeepLinkerSignature ->
+                logger.lifecycle("Keeping the linker's signature on ${file.name}")
+            NativeCliOutput.MacSigning.ReSignAdHoc -> {
+                logger.lifecycle("The signature on ${file.name} no longer verifies: signing it ad hoc")
+                NoCertificateSigner(runExternalTool).sign(file)
+            }
+        }
     }
 }
 
@@ -182,10 +269,6 @@ abstract class AbstractNativeLinuxPackageTask : AbstractNativeMacApplicationPack
     @get:Input
     @get:Optional
     val vendor: Property<String> = objects.property()
-
-    @get:Input
-    @get:Optional
-    val maintainer: Property<String> = objects.property()
 
     @get:Input
     val architecture: Property<String> = objects.property<String>().value("amd64")
@@ -222,7 +305,7 @@ abstract class AbstractNativeLinuxPackageTask : AbstractNativeMacApplicationPack
 /**
  * The AppDir layout: `usr/bin/<name>`, its resources beside it, `<name>.desktop`, the icon,
  * `.DirIcon` and an `AppRun` that starts the executable. It runs as it is, and it is what the
- * AppImage and the deb are made from.
+ * AppImage is made from.
  */
 @DisableCachingByDefault(because = "Stages files")
 abstract class AbstractNativeLinuxAppDirTask : AbstractNativeLinuxPackageTask() {
@@ -279,52 +362,6 @@ abstract class AbstractNativeLinuxAppImageTask : AbstractNativeLinuxPackageTask(
     private fun String.appImageArch() = if (this == "arm64") "aarch64" else "x86_64"
 }
 
-@DisableCachingByDefault(because = "Runs dpkg-deb")
-abstract class AbstractNativeLinuxDebTask : AbstractNativeLinuxPackageTask() {
-    override fun createPackage(destinationDir: File, workingDir: File) {
-        val debName = DebControl.debianPackageName(appName)
-        val stage = workingDir.resolve("deb-root").apply { deleteRecursively(); mkdirs() }
-        val installDir = stage.resolve("opt/$debName").apply { mkdirs() }
-        val exe = installDir.resolve(appName)
-        executable.ioFile.copyTo(exe, overwrite = true)
-        exe.makeExecutable()
-        copyResources(installDir)
-        iconFile.orNull?.asFile?.let {
-            it.copyTo(stage.resolve("usr/share/icons/hicolor/256x256/apps/$debName.png").apply { parentFile.mkdirs() })
-        }
-        stage.resolve("usr/bin").mkdirs()
-        java.nio.file.Files.createSymbolicLink(
-            stage.resolve("usr/bin/$debName").toPath(),
-            java.nio.file.Paths.get("/opt/$debName/$appName")
-        )
-        stage.resolve("usr/share/applications/$debName.desktop").apply {
-            parentFile.mkdirs()
-            writeText(desktopEntry(exec = "/opt/$debName/$appName", icon = debName))
-        }
-        val sizeKb = stage.walk().filter { it.isFile }.sumOf { it.length() } / 1024
-        stage.resolve("DEBIAN/control").apply {
-            parentFile.mkdirs()
-            writeText(
-                DebControl.render(
-                    packageName = appName,
-                    version = packageVersion.get(),
-                    architecture = architecture.get(),
-                    maintainer = maintainer.orNull ?: vendor.orNull ?: "Unknown <unknown@localhost>",
-                    description = appDescription.orNull ?: appName,
-                    installedSizeKb = sizeKb,
-                    depends = listOf("libc6", "libx11-6", "libxext6", "libxi6", "libxrandr2", "libxcursor1"),
-                )
-            )
-        }
-        val deb = destinationDir.resolve("${debName}_${packageVersion.get()}_${architecture.get()}.deb")
-        runExternalTool(
-            tool = findOnPath("dpkg-deb") ?: error("dpkg-deb was not found; install the dpkg package."),
-            args = listOf("--build", "--root-owner-group", stage.absolutePath, deb.absolutePath)
-        )
-        logger.lifecycle("The distribution is written to ${deb.canonicalPath}")
-    }
-}
-
 // endregion
 
 // region Windows
@@ -368,89 +405,6 @@ abstract class AbstractNativeWindowsAppDirTask : AbstractNativeMacApplicationPac
                 spec.into(dir.resolve("compose-resources").apply { mkdirs() })
             }
         }
-    }
-}
-
-/** `<name>-<version>.zip` of the application folder, the portable form of the exe. */
-@DisableCachingByDefault(because = "Zips files")
-abstract class AbstractNativeWindowsZipTask : AbstractNativeMacApplicationPackageTask() {
-    @get:InputDirectory
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    val appDir: DirectoryProperty = objects.directoryProperty()
-
-    override fun createPackage(destinationDir: File, workingDir: File) {
-        val zip = destinationDir.resolve("${fullPackageName.get()}.zip")
-        java.util.zip.ZipOutputStream(zip.outputStream().buffered()).use { out ->
-            val root = appDir.ioFile
-            root.walk().filter { it.isFile }.forEach { file ->
-                out.putNextEntry(java.util.zip.ZipEntry(file.relativeTo(root.parentFile).invariantSeparatorsPath))
-                file.inputStream().use { it.copyTo(out) }
-                out.closeEntry()
-            }
-        }
-        logger.lifecycle("The distribution is written to ${zip.canonicalPath}")
-    }
-}
-
-/** An msi from the application folder, through WiX 3 (`candle` and `light`). */
-@DisableCachingByDefault(because = "Runs the WiX toolset")
-abstract class AbstractNativeWindowsMsiTask : AbstractNativeMacApplicationPackageTask() {
-    @get:InputDirectory
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    val appDir: DirectoryProperty = objects.directoryProperty()
-
-    @get:InputDirectory
-    @get:Optional
-    @get:PathSensitive(PathSensitivity.ABSOLUTE)
-    val wixToolsetDir: DirectoryProperty = objects.directoryProperty()
-
-    @get:Input
-    @get:Optional
-    val vendor: Property<String> = objects.property()
-
-    @get:Input
-    @get:Optional
-    val upgradeUuid: Property<String> = objects.property()
-
-    @get:Input
-    val perUserInstall: Property<Boolean> = objects.property<Boolean>().value(false)
-
-    @get:Input
-    val shortcut: Property<Boolean> = objects.property<Boolean>().value(false)
-
-    override fun createPackage(destinationDir: File, workingDir: File) {
-        val name = packageName.get()
-        val wixDir = wixToolsetDir.orNull?.asFile
-            ?: System.getenv("WIX_PATH")?.let(::File)
-            ?: error("The WiX toolset was not found. Set WIX_PATH to a WiX 3 binaries directory.")
-        val candle = wixDir.resolve("candle.exe")
-        val light = wixDir.resolve("light.exe")
-        check(candle.isFile && light.isFile) { "candle.exe and light.exe are not in $wixDir" }
-
-        val root = appDir.ioFile.resolve(name)
-        val files = root.walk().filter { it.isFile }.map { it.relativeTo(root).invariantSeparatorsPath }.toList()
-        val source = workingDir.resolve("$name.wxs")
-        source.writeText(
-            WindowsInstallerSource.render(
-                productName = name,
-                version = packageVersion.get(),
-                manufacturer = vendor.orNull ?: name,
-                exeName = "$name.exe",
-                upgradeCode = upgradeUuid.orNull ?: WindowsInstallerSource.guid(name),
-                perUser = perUserInstall.get(),
-                shortcut = shortcut.get(),
-                files = files,
-            )
-        )
-        val obj = workingDir.resolve("$name.wixobj")
-        val msi = destinationDir.resolve("${fullPackageName.get()}.msi")
-        runExternalTool(candle, listOf("-nologo", "-out", obj.absolutePath, source.absolutePath), workingDir = root)
-        runExternalTool(
-            light,
-            listOf("-nologo", "-sval", "-out", msi.absolutePath, "-b", root.absolutePath, obj.absolutePath),
-            workingDir = root
-        )
-        logger.lifecycle("The distribution is written to ${msi.canonicalPath}")
     }
 }
 

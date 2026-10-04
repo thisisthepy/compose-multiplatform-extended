@@ -1,0 +1,120 @@
+# The Kotlin/Native desktop path without Compose: the Windows MSVC link step's unit tests on
+# Ubuntu, and the plain hello sample (no Compose in it) built and run on Linux, macOS and
+# Windows with the plugin from this branch. On Windows the sample is Kotlin/Native's mingwX64
+# output linked into an .exe by MSVC from the runner image, and a control proves the rewrite
+# of the MinGW objects is what makes it work. No paths filter: a skipped required check blocks
+# a merge. The inherited upstream workflows are left alone.
+name: extended-kotlin-msvc
+
+on:
+  pull_request:
+  push:
+    branches: [ extended ]
+  workflow_dispatch:
+
+concurrency:
+  group: extended-kotlin-msvc-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests (ubuntu)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: MSVC detection, command lines, COFF rewrite and directive blanking
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon --console=plain :kotlin-native-desktop:test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: msvc-unit-reports
+          path: extended/kotlin-native-desktop/build/reports
+          if-no-files-found: ignore
+
+  hello:
+    name: hello-plain (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-24.04, task: linkReleaseExecutableLinuxX64 }
+          - { name: macos-arm64, os: macos-latest, task: linkReleaseExecutableMacosArm64 }
+          - { name: windows-msvc, os: windows-latest, task: linkReleaseExecutableMingwX64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Plugin to the local repository
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon --console=plain :kotlin-native-desktop:publishToMavenLocal -Pdeploy.version=0.1.0-extended-dev
+
+      - name: The MSVC on this runner
+        if: runner.os == 'Windows'
+        run: |
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          "$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath -property installationVersion
+          for root in $("$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | tr -d '\r' | sed 's|\\|/|g'); do
+            ls "$root/VC/Tools/MSVC"
+          done
+
+      - name: Link hello-plain
+        working-directory: extended/native-desktop/hello-plain
+        run: ./gradlew --no-daemon --console=plain ${{ matrix.task }}
+
+      - name: Run it
+        working-directory: extended/native-desktop/hello-plain
+        run: |
+          set -euo pipefail
+          exe="$(find build/bin -type f \( -name '*.kexe' -o -name 'hello.exe' \) -not -path '*.dSYM/*' | head -1)"
+          echo "running $exe"
+          "$exe" --self-check | tee run.log
+          grep -q 'self-check ok' run.log
+
+      - name: Which DLLs the executable asks Windows for
+        if: runner.os == 'Windows'
+        working-directory: extended/native-desktop/hello-plain
+        run: |
+          set -euo pipefail
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          root="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r' | sed 's|\\|/|g')"
+          dumpbin="$(ls "$root"/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe | tail -1)"
+          "$dumpbin" /nologo /dependents build/bin/mingwX64/releaseExecutable/hello.exe | tee dumpbin.log
+          # Only parts of Windows: no MinGW or Visual C++ runtime DLL beside the executable.
+          ! grep -iE 'libstdc|libgcc|libwinpthread|vcruntime|msvcp' dumpbin.log
+
+      - name: Control, linked without the MinGW rewrite, has to fail
+        if: runner.os == 'Windows'
+        working-directory: extended/native-desktop/hello-plain
+        run: |
+          set -u
+          cp build/bin/mingwX64/releaseExecutable/hello.exe hello-rewritten.exe
+          if ./gradlew --no-daemon --console=plain linkReleaseExecutableMingwX64 -Phello.unrewritten=true > control-link.log 2>&1; then
+            status=0
+            timeout 60 build/bin/mingwX64/releaseExecutable/hello.exe --self-check > control-run.log 2>&1 || status=$?
+            cat control-run.log
+            if [ "$status" -eq 0 ] && grep -q 'self-check ok' control-run.log; then
+              echo "the control passed without the rewrite, so the rewrite proves nothing" >&2
+              exit 1
+            fi
+            echo "the control linked and then failed (exit $status), as it should"
+          else
+            grep -E 'LNK[0-9]+' control-link.log | head -3 || true
+            echo "the MSVC linker refused the unrewritten objects, as it should"
+          fi

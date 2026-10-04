@@ -455,7 +455,7 @@ abstract class AbstractMsixTask : AbstractBundleTask() {
     companion object {
         const val INSTALL_FILE = "INSTALL-msix.txt"
 
-        fun installInstructions(msix: String, layout: String, publisher: String, version: MsixVersion) = """
+        internal fun installInstructions(msix: String, layout: String, publisher: String, version: MsixVersion) = """
             $msix is an unsigned MSIX package, version $version.
 
             Windows installs a package only when it is signed. Pick one of these.

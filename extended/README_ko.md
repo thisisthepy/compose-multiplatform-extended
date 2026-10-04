@@ -64,9 +64,19 @@ Kotlin/Native 앱 종류별 출력입니다. 소유자, 2026-10-05:
 |---|---|---|---|
 | macOS | `.app` | `.dmg` | `.pkg` |
 | Linux | `.AppImage` | `.deb`, `.rpm` | Flatpak |
-| Windows | `.exe` | `.msi`(결정 중), 설치용 `.exe`(Velopack) | `.msix` |
+| Windows | `.exe` | `.msi`, `.exe`(설치) | `.msix` |
 
-Compose 플러그인은 업스트림의 `nativeDistributions` 를 확장합니다. JVM 출력에서 이미 동작하는 `TargetFormat`(`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`)이 Kotlin/Native 창 앱에서도 동작하고, 업스트림에 없는 형식(진짜 `.AppImage` 파일, Flatpak, MSIX)은 같은 방식으로 더합니다. 지금 구현된 것은 `.dmg`, `.pkg`, `.deb`, `.rpm` 입니다. Flatpak, `.msix`, Velopack 설치 프로그램은 만드는 중이고 `.msi` 는 결정 중입니다.
+Compose 플러그인은 업스트림의 `nativeDistributions` 를 확장합니다. JVM 출력에서 이미 동작하는 `TargetFormat`(`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`)이 Kotlin/Native 창 앱에서도 동작하고, 업스트림에 없는 형식(진짜 `.AppImage` 파일, Flatpak, MSIX)은 같은 방식으로 더합니다.
+
+직접 배포 형식은 모든 OS 에서 Velopack 이 만듭니다. Windows 의 `Setup.exe` 와 `.msi`, macOS 의 `.dmg`(Velopack 은 dmg 를 만들지 못하므로 Velopack 의 portable zip 안의 `.app` 으로 만듭니다), Linux 의 `.AppImage` 입니다. 소유자, 2026-10-05:
+
+> [user] "윈도우는 Velopack으로 하자. NSIS랑 wix는 너무 별로야."
+
+플러그인은 패키지와 업데이트 피드 산출물(전체·델타 패키지와 `releases.<channel>.json`)을 만듭니다. 설치된 앱을 업데이트하는 일은 플러그인의 몫이 아닙니다. 앱 개발자는 Velopack SDK 를 직접 씁니다. 소유자, 2026-10-05:
+
+> [user] "업데이트 sdk 때문에 그런거면 그건 우리가 커버쳐줄 부분은 아닌거같아."
+
+`.pkg`(Velopack 이 만드는 일반 `.pkg` 와 따로 만드는 Mac App Store 형식), `.deb`, `.rpm` 은 플러그인의 태스크가 만듭니다. Flatpak 과 `.msix` 는 따로 만듭니다. 각각의 상태는 [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) 에 있습니다.
 
 서명. `.dmg`, `.msi`, 설치용 `.exe` 는 서명 없이 설치되며 기본 배포 경로입니다. `.pkg` 와 `.msix` 는 스토어 형식으로, 스토어 제출(스토어가 다시 서명)이나 인증서가 있을 때를 위한 것입니다.
 

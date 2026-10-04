@@ -109,13 +109,28 @@ What each kind of Kotlin/Native app produces. Owner, 2026-10-05:
 |---|---|---|---|
 | macOS | `.app` | `.dmg` | `.pkg` |
 | Linux | `.AppImage` | `.deb`, `.rpm` | Flatpak |
-| Windows | `.exe` | `.msi` (under decision), installer `.exe` (Velopack) | `.msix` |
+| Windows | `.exe` | `.msi`, `.exe` (installer) | `.msix` |
 
 The Compose plugin extends upstream's `nativeDistributions`: the same `TargetFormat`s that
 already work on the JVM output (`Dmg`, `Pkg`, `Deb`, `Rpm`, `Msi`, `Exe`) work for a Kotlin/Native
 window app, and the formats upstream lacks (a real `.AppImage` file, Flatpak, MSIX) are added
-in the same style. Today `.dmg`, `.pkg`, `.deb` and `.rpm` are implemented. Flatpak, `.msix` and
-the Velopack installer are being built, and `.msi` is under decision.
+in the same style.
+
+Velopack builds the direct distribution formats on every OS: the Windows `Setup.exe` and
+`.msi`, the macOS `.dmg` (made from the `.app` in Velopack's portable zip, because Velopack
+makes no dmg itself), and the Linux `.AppImage`. Owner, 2026-10-05:
+
+> [user] "윈도우는 Velopack으로 하자. NSIS랑 wix는 너무 별로야."
+
+The plugin produces the packages and the update feed artifacts (full and delta packages and
+`releases.<channel>.json`). Updating an installed application is not the plugin's job:
+application developers use the Velopack SDK directly. Owner, 2026-10-05:
+
+> [user] "업데이트 sdk 때문에 그런거면 그건 우리가 커버쳐줄 부분은 아닌거같아."
+
+The `.pkg` (the Mac App Store form, built apart from the general `.pkg` Velopack makes), `.deb`
+and `.rpm` come from the plugin's own tasks. Flatpak and `.msix` are built separately. The
+state of each is in [`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md).
 
 Signing. `.dmg`, `.msi` and the installer `.exe` install unsigned and are the default way to
 distribute. `.pkg` and `.msix` are store formats: they are for store submission (the store

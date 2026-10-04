@@ -19,7 +19,7 @@ kotlin {
     target.binaries.executable { entryPoint = "hello.main" }
 }
 
-compose.nativeApplication {
+compose.desktop.nativeApplication {
     binarySettings {
         // The X11 and GL development libraries are not installed on a bare Linux runner.
         linkWindowSystem.set(providers.gradleProperty("hello.linkWindowSystem").map { it.toBoolean() }.orElse(false))

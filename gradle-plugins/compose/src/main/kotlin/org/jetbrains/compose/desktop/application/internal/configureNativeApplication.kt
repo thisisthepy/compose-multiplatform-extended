@@ -10,6 +10,8 @@ import org.gradle.api.Task
 import org.gradle.api.tasks.TaskContainer
 import org.gradle.api.tasks.TaskProvider
 import org.jetbrains.compose.desktop.application.dsl.NativeApplication
+import org.jetbrains.compose.desktop.application.extended.NativeOsPackager
+import org.jetbrains.compose.desktop.application.extended.NativePackagingContext
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.compose.desktop.application.tasks.AbstractNativeMacApplicationPackageAppDirTask
 import org.jetbrains.compose.desktop.application.tasks.AbstractNativeMacApplicationPackageDmgTask
@@ -58,6 +60,13 @@ private fun configureNativeApplication(
     binary: NativeBinary,
     unpackDefaultResources: TaskProvider<AbstractUnpackDefaultComposeApplicationResourcesTask>
 ) {
+    // Packaging needs the tools of the OS it packages for, so only that OS's binaries get tasks.
+    val packager = NativeOsPackager.forFamily(binary.target.konanTarget.family)?.takeIf { it.os == currentOS } ?: return
+    val packaging = NativePackagingContext(project, app, binary, unpackDefaultResources)
+    if (packager.os != OS.MacOS) {
+        packager.configure(packaging)
+        return
+    }
     val createDistributable = project.tasks.composeDesktopNativeTask<AbstractNativeMacApplicationPackageAppDirTask>(
         desktopNativeTaskName("createDistributableNative", binary)
     ) {
@@ -96,6 +105,7 @@ private fun configureNativeApplication(
             })
         }
     }
+    packager.configure(packaging)
 }
 
 private fun configureNativeBinary(app: NativeApplication, binary: NativeBinary) {

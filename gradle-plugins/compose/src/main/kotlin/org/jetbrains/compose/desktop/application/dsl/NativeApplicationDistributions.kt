@@ -9,7 +9,7 @@ import org.gradle.api.Action
 import java.util.*
 
 abstract class NativeApplicationDistributions : AbstractDistributions() {
-    private val supportedFormats = EnumSet.of(TargetFormat.Dmg)
+    private val supportedFormats = EnumSet.of(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Exe)
 
     override fun targetFormats(vararg formats: TargetFormat) {
         val unsupportedFormats = formats.filter { it !in supportedFormats }
@@ -21,6 +21,16 @@ abstract class NativeApplicationDistributions : AbstractDistributions() {
             )
         }
         super.targetFormats(*formats)
+    }
+
+    val linux: LinuxPlatformSettings = objects.newInstance(LinuxPlatformSettings::class.java)
+    open fun linux(fn: Action<LinuxPlatformSettings>) {
+        fn.execute(linux)
+    }
+
+    val windows: WindowsPlatformSettings = objects.newInstance(WindowsPlatformSettings::class.java)
+    open fun windows(fn: Action<WindowsPlatformSettings>) {
+        fn.execute(windows)
     }
 
     val macOS: NativeApplicationMacOSPlatformSettings = objects.newInstance(NativeApplicationMacOSPlatformSettings::class.java)

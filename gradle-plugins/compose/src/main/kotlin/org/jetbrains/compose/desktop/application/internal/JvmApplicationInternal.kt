@@ -10,6 +10,9 @@ import org.gradle.api.Task
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.SourceSet
+import org.gradle.api.provider.Property
+import org.jetbrains.compose.desktop.application.dsl.ApplicationOutput
+import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
 import org.jetbrains.compose.desktop.application.dsl.JvmApplication
 import org.jetbrains.compose.desktop.application.dsl.JvmApplicationDistributions
 import org.jetbrains.compose.desktop.application.dsl.JvmApplicationBuildTypes
@@ -72,6 +75,8 @@ internal open class JvmApplicationInternal @Inject constructor(
         fn.execute(data.buildTypes)
     }
 
+    final override val output: Property<ApplicationOutput> by data::output
+    final override val windowing: Property<ApplicationWindowing> by data::windowing
     final override val nativeImage: NativeImageSettings by data::nativeImage
     final override fun nativeImage(fn: Action<NativeImageSettings>) {
         fn.execute(data.nativeImage)

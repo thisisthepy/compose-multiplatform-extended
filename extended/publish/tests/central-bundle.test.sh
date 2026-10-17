@@ -199,6 +199,20 @@ PY2
 python3 -I "$tool" sign "$out" --checksums-only > /dev/null
 expect_fail "a dev POM naming a release fork version fails" "fork version without $S" "$out" --dev="$S" --unsigned
 
+# A two-commit suffix (a plugin built against a core dev build) is a dev build too.
+repo2="$work/dev2-repo"; out="$work/dev2-out"; rm -rf "$repo2" "$out"
+make_repo "$repo2"
+S2=-dev.0123abcdef.fedcba9876
+python3 -I "$tool" stage --from "$repo2" --out "$out" --dev-suffix="$S2" > /dev/null
+python3 -I "$tool" sign "$out" --checksums-only > /dev/null
+python3 -I "$tool" validate "$out" --dev="$S2" --unsigned > "$work/log" &&
+    pass "a two-commit dev suffix validates" || { fail "a two-commit dev suffix"; cat "$work/log" >&2; }
+if python3 -I "$tool" stage --from "$repo2" --out "$work/dev3-out" --dev-suffix=-dev.main > "$work/log" 2>&1; then
+    fail "a dev suffix that is not a commit was accepted"
+else
+    pass "a dev suffix that is not a commit is refused"
+fi
+
 # put: files reach the server, each POM after its component's files, then maven-metadata.xml.
 out="$work/dev-out2"; rm -rf "$out"
 python3 -I "$tool" stage --from "$repo" --out "$out" --dev-suffix="$S" > /dev/null

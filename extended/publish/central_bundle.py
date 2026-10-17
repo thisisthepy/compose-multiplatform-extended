@@ -80,7 +80,9 @@ CHECKSUMS = {"md5": hashlib.md5, "sha1": hashlib.sha1, "sha256": hashlib.sha256,
 SIDE_FILES = tuple("." + ext for ext in CHECKSUMS) + (".asc",)
 SKIPPED = ("maven-metadata", "_remote.repositories", ".lastUpdated")
 VERSION_RULE = re.compile(r"^\d+(\.\d+)*(-[A-Za-z0-9.]+)?-ext\.\d+$")
-DEV_SUFFIX = re.compile(r"^-dev\.[0-9a-f]{7,40}$")
+# -dev.<commit>, or -dev.<commit>.<commit> for a build made against another repository's dev
+# build (the plugin against the core fork's).
+DEV_SUFFIX = re.compile(r"^-dev\.[0-9a-f]{7,40}(\.[0-9a-f]{7,40})?$")
 DEVELOPER = {"id": "thisisthepy", "name": "thisisthepy", "url": "https://github.com/thisisthepy"}
 LICENSE = {"name": "The Apache License, Version 2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"}
 
@@ -156,7 +158,7 @@ def stage(sources, out, project, dev_suffix=None):
 
 def rename_versions(out, suffix):
     if not DEV_SUFFIX.match(suffix):
-        sys.exit(f"error: a dev suffix is -dev.<commit>, not '{suffix}'")
+        sys.exit(f"error: a dev suffix is -dev.<commit>[.<commit>], not '{suffix}'")
     found = list(components(out))
     mapping = {(g, a, v): v + suffix for g, a, v, _ in found}
 
@@ -588,7 +590,7 @@ def main():
         sign(args.dir, args.key, args.checksums_only)
     elif args.command == "validate":
         if args.dev and not DEV_SUFFIX.match(args.dev):
-            sys.exit(f"error: a dev suffix is -dev.<commit>, not '{args.dev}'")
+            sys.exit(f"error: a dev suffix is -dev.<commit>[.<commit>], not '{args.dev}'")
         return validate(args.dir, args.version, args.require, args.verify_signatures, args.dev, args.unsigned)
     elif args.command == "put":
         put(args.dir, args.url)

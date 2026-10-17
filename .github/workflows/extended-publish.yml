@@ -3,11 +3,14 @@
 # marker artifacts) and to the Gradle Plugin Portal.
 #
 # Three modes, one set of jobs:
-# - dev (a push to extended): builds every publication at <deploy.version>-dev.<commit>, checks
-#   it, applies the plugin by its ID from it, and uploads it to GitHub Packages,
+# - dev (a push to extended, or a manual run with mode dev on extended, which the core fork's
+#   dev publish starts for each of its builds): builds every publication at
+#   <deploy.version>-dev.<this commit>.<core commit>, checks it, applies the plugin by its ID
+#   from it, and uploads it to GitHub Packages,
 #   https://maven.pkg.github.com/thisisthepy/compose-multiplatform-extended. Not signed. The
-#   plugin's aliases name compose.version from gradle.properties, or the compose_version input
-#   of a manual run (a core dev build such as 1.11.1-ext.1-dev.<commit>).
+#   plugin's aliases name the core fork's dev build of <core commit>: the one named by the
+#   core_commit input, or else the core fork's latest successful dev publish, so every plugin
+#   dev build names libraries that exist.
 # - dry run (a pull request, or a manual run with no tag): builds both, checks the dev build,
 #   and checks the Central bundle signed with a key made in the job and thrown away after,
 #   plugin markers included. Nothing is uploaded. The Plugin Portal is not asked anything:
@@ -46,8 +49,13 @@ on:
         type: choice
         options: [ USER_MANAGED, AUTOMATIC ]
         default: USER_MANAGED
-      compose_version:
-        description: The Compose version the plugin's aliases name in a dev build. Empty takes compose.version.
+      mode:
+        description: dry-run checks everything and uploads nothing; dev publishes a dev build (extended only).
+        type: choice
+        options: [ dry-run, dev ]
+        default: dry-run
+      core_commit:
+        description: The core fork commit whose dev build the plugin's aliases name. Empty takes its latest dev publish.
         required: false
         default: ''
   pull_request:
@@ -81,7 +89,9 @@ jobs:
       release: ${{ steps.plan.outputs.release }}
       ref: ${{ steps.plan.outputs.ref }}
       version: ${{ steps.plan.outputs.version }}
-      suffix: ${{ steps.plan.outputs.suffix }}
+      suffix: ${{ steps.core.outputs.suffix || steps.plan.outputs.suffix }}
+      compose_version: ${{ steps.core.outputs.compose_version }}
+      material3_version: ${{ steps.core.outputs.material3_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,6 +110,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           read_version() { sed -n 's/^deploy\.version=//p'; }
@@ -110,7 +121,11 @@ jobs:
             tag="$INPUT_TAG"
           fi
           suffix="-dev.$(git rev-parse --short=10 "$GITHUB_SHA")"
-          if [[ "$EVENT" == push && "$GITHUB_REF" == refs/heads/extended ]]; then
+          if [[ "$EVENT" == workflow_dispatch && "$INPUT_MODE" == dev && "$GITHUB_REF" != refs/heads/extended ]]; then
+            echo "::error::a dev build is published from extended only, not $GITHUB_REF"
+            exit 1
+          fi
+          if [[ ( "$EVENT" == push && "$GITHUB_REF" == refs/heads/extended ) || ( "$EVENT" == workflow_dispatch && "$INPUT_MODE" == dev && -z "$tag" ) ]]; then
             version="$(read_version < gradle-plugins/gradle.properties)"
             echo "dev build of $GITHUB_SHA: $version$suffix"
             { echo "central=false"; echo "dev=true"; echo "release=false"; echo "ref=$GITHUB_SHA"
@@ -144,6 +159,43 @@ jobs:
           echo "release $tag: $commit at $version"
           { echo "central=true"; echo "dev=false"; echo "release=true"; echo "ref=$commit"
             echo "version=$version"; echo "suffix="; } >> "$GITHUB_OUTPUT"
+
+      # Which core dev build the plugin's dev build names, and that build's versions. The core
+      # fork is public, so the workflow's own token reads its runs and files.
+      - name: Find the core fork's dev build
+        id: core
+        if: steps.plan.outputs.dev == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_CORE: ${{ inputs.core_commit }}
+          SUFFIX: ${{ steps.plan.outputs.suffix }}
+        run: |
+          set -euo pipefail
+          core=thisisthepy/compose-multiplatform-core-extended
+          commit="$INPUT_CORE"
+          if [[ -z "$commit" ]]; then
+            commit="$(gh api "repos/$core/actions/workflows/extended-publish.yml/runs?branch=extended&event=push&status=success&per_page=1" \
+              -q '.workflow_runs[0].head_sha // empty' || true)"
+          fi
+          if [[ -z "$commit" ]]; then
+            if [[ "$EVENT" == pull_request ]]; then
+              echo "::notice::the core fork has no dev publish yet; this dry run's plugin names gradle.properties' Compose versions"
+              exit 0
+            fi
+            echo "::error::the core fork has no successful dev publish to name; a plugin dev build would name libraries that do not exist"
+            exit 1
+          fi
+          properties="$(gh api "repos/$core/contents/gradle.properties?ref=$commit" -q .content | base64 -d)"
+          line() { sed -n "s/^jetbrains\.publication\.version\.$1=//p" <<< "$properties"; }
+          short="$(gh api "repos/$core/commits/$commit" -q .sha | cut -c1-10)"
+          compose="$(line COMPOSE)-dev.$short"
+          material3="$(line COMPOSE_MATERIAL3)"
+          material3="${material3:-$(line COMPOSE)}-dev.$short"
+          echo "core $commit: Compose $compose, Material 3 $material3"
+          { echo "compose_version=$compose"; echo "material3_version=$material3"
+            echo "suffix=$SUFFIX.$short"; } >> "$GITHUB_OUTPUT"
 
   bundle:
     name: Build and check the publications
@@ -228,11 +280,14 @@ jobs:
         working-directory: gradle-plugins
         env:
           COMPOSE_GRADLE_PLUGIN_VERSION: ${{ needs.plan.outputs.version }}${{ needs.plan.outputs.suffix }}
-          COMPOSE_GRADLE_PLUGIN_COMPOSE_VERSION: ${{ inputs.compose_version }}
+          COMPOSE_VERSION: ${{ needs.plan.outputs.compose_version }}
+          MATERIAL3_VERSION: ${{ needs.plan.outputs.material3_version }}
         run: |
           set -euo pipefail
-          [[ -n "$COMPOSE_GRADLE_PLUGIN_COMPOSE_VERSION" ]] || unset COMPOSE_GRADLE_PLUGIN_COMPOSE_VERSION
-          ./gradlew --no-daemon publishAllPublicationsToLocalDirRepository
+          versions=()
+          [[ -z "$COMPOSE_VERSION" ]] || versions+=("-Pcompose.version=$COMPOSE_VERSION")
+          [[ -z "$MATERIAL3_VERSION" ]] || versions+=("-Pcompose.material3.version=$MATERIAL3_VERSION")
+          ./gradlew --no-daemon publishAllPublicationsToLocalDirRepository ${versions[@]+"${versions[@]}"}
           mv build/repo "$RUNNER_TEMP/dev-repo"
 
       - name: Check the dev build
@@ -249,6 +304,30 @@ jobs:
             --dev="$SUFFIX" --unsigned "${required[@]}"
           python3 -I "$RUNNER_TEMP/markers.py" "$RUNNER_TEMP/dev" "$VERSION$SUFFIX"
           bash "$RUNNER_TEMP/consume.sh" "$RUNNER_TEMP/dev" "$VERSION$SUFFIX"
+
+      # What the plugin carries inside: its own version, the core dev build its aliases name,
+      # and the upstream version the JetBrains libraries it still uses are asked for at.
+      - name: Check the versions the dev plugin names
+        if: env.DEV == 'true'
+        shell: bash
+        env:
+          COMPOSE_VERSION: ${{ needs.plan.outputs.compose_version }}
+        run: |
+          set -euo pipefail
+          jar="$RUNNER_TEMP/dev/org/thisisthepy/compose/compose-gradle-plugin/$VERSION$SUFFIX/compose-gradle-plugin-$VERSION$SUFFIX.jar"
+          config="$(javap -constants -cp "$jar" org.jetbrains.compose.ComposeBuildConfig)"
+          echo "$config" | grep 'String compose'
+          value() { sed -n "s/.* $1 = \"\(.*\)\";/\1/p" <<< "$config"; }
+          [[ "$(value composeGradlePluginVersion)" == "$VERSION$SUFFIX" ]] ||
+            { echo "::error::the plugin carries version $(value composeGradlePluginVersion), not $VERSION$SUFFIX"; exit 1; }
+          if [[ -n "$COMPOSE_VERSION" ]]; then
+            [[ "$(value composeVersion)" == "$COMPOSE_VERSION" ]] ||
+              { echo "::error::the aliases name Compose $(value composeVersion), not the core dev build $COMPOSE_VERSION"; exit 1; }
+          fi
+          upstream="$(value composeUpstreamVersion)"
+          [[ "$upstream" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+            { echo "::error::the upstream version is '$upstream', which still carries the fork's suffix"; exit 1; }
+          echo "ok    the plugin is $VERSION$SUFFIX, names Compose $(value composeVersion), upstream $upstream"
 
       - uses: actions/upload-artifact@v4
         if: env.DEV == 'true'

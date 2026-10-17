@@ -158,6 +158,39 @@ python3 -I "$tool" stage --from "$a" --from "$b" --out "$out" > "$work/log"
 [[ "$(cat "$out/org/thisisthepy/compose/ui/ui-linuxx64/$V/ui-linuxx64-$V.klib")" == klib ]] && grep -q "kept the copy" "$work/log" &&
     pass "the first repository wins a conflict, and it is reported" || fail "conflict handling"
 
+# A root that lists a target the release does not build, and a constraint on a sibling the
+# release does not publish: both are taken out at staging, and listed. A real dependency on a
+# missing fork artifact is not, so validate still catches it.
+repo="$work/prune-repo"; out="$work/prune-out"; rm -rf "$repo" "$out"
+make_repo "$repo"
+m="$repo/org/thisisthepy/compose/ui/ui/$V/ui-$V.module"
+python3 -I - "$m" "$V" <<'PY2'
+import json, sys
+path, v = sys.argv[1:]
+m = json.load(open(path))
+m["variants"].append({"name": "iosArm64ApiElements-published", "available-at": {"url": f"../../ui-iosarm64/{v}/ui-iosarm64-{v}.module", "group": "org.thisisthepy.compose.ui", "module": "ui-iosarm64", "version": v}})
+m["variants"][1]["dependencyConstraints"] = [{"group": "org.thisisthepy.compose.ui", "module": "ui-unpublished", "version": {"requires": v}}]
+json.dump(m, open(path, "w"))
+PY2
+p="$repo/org/thisisthepy/compose/ui/ui/$V/ui-$V.pom"
+python3 -I - "$p" "$V" <<'PY2'
+import sys
+path, v = sys.argv[1:]
+text = open(path).read().replace("</project>",
+    f"<dependencyManagement><dependencies><dependency><groupId>org.thisisthepy.compose.ui</groupId><artifactId>ui-unpublished</artifactId><version>{v}</version></dependency></dependencies></dependencyManagement></project>")
+open(path, "w").write(text)
+PY2
+python3 -I "$tool" stage --from "$repo" --out "$out" > "$work/log"
+python3 -I "$tool" sign "$out" > /dev/null
+if python3 -I "$tool" validate "$out" > "$work/vlog" && grep -q "prune org.thisisthepy.compose.ui:ui:$V: constraint on ui-unpublished, variant on ui-iosarm64" "$work/log" &&
+    ! grep -q "ui-iosarm64\|ui-unpublished" "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.module" "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.pom"; then
+    pass "variants and constraints on what is not staged are taken out and listed"
+else
+    fail "pruning"; cat "$work/log" "$work/vlog" >&2
+fi
+grep -q "linuxX64ApiElements-published" "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.module" &&
+    pass "a variant on a staged target is kept" || fail "a staged target's variant was pruned"
+
 # A dev build: every version, and every reference to one, gets the suffix.
 S=-dev.0123abc
 repo="$work/dev-repo"; out="$work/dev-out"; rm -rf "$repo" "$out"

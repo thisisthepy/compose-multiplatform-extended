@@ -23,6 +23,13 @@ stage    copies every component under org/thisisthepy from each repository into 
          url and scm always name the repository the artifacts are built from, since that is
          where their sources are. A component that is not a bare POM gets an empty javadoc
          jar when it has none, and an empty sources jar when it has none; both are listed.
+         A Kotlin Multiplatform root lists a variant for every target the build configured, and
+         a constraint for every sibling library, whether or not this release builds them: a
+         root variant whose available-at names a fork component that is not staged, and a
+         constraint (Gradle dependencyConstraints, POM dependencyManagement) on one, are taken
+         out and listed, so the root offers only the targets the bundle carries and a consumer
+         on another target is told the module does not support it instead of failing on a
+         missing file. A real dependency on a missing fork component is left for validate.
          With --dev-suffix every staged version V becomes V<suffix>, everywhere it is named:
          directories, file names, each POM's own version and the versions of the fork's
          artifacts it depends on, and in each Gradle module the component, its variants'
@@ -137,6 +144,7 @@ def stage(sources, out, project, dev_suffix=None):
                 shutil.copy2(src, dst)
     for line in conflicts:
         print(f"note  {line}")
+    prune_unbuilt(out)
     if dev_suffix:
         rename_versions(out, dev_suffix)
 
@@ -154,6 +162,55 @@ def stage(sources, out, project, dev_suffix=None):
     for line in added:
         print(f"empty {line}")
     print(f"staged {sum(1 for _ in components(out))} component(s) in {out}, {len(added)} empty jar(s) added")
+
+
+def prune_unbuilt(out):
+    pruned = {}
+    for group, artifact, version, directory in list(components(out)):
+        where = f"{group}:{artifact}:{version}"
+        stem = f"{artifact}-{version}"
+        module_path = os.path.join(directory, stem + ".module")
+        if os.path.isfile(module_path):
+            with open(module_path) as f:
+                metadata = json.load(f)
+            kept = []
+            for variant in metadata.get("variants", []):
+                at = variant.get("available-at")
+                if at and at.get("group", "").startswith(PREFIX) and not present(out, at["group"], at.get("module", ""), at.get("version", "")):
+                    pruned.setdefault(where, set()).add(f"variant on {at.get('module')}")
+                    continue
+                constraints = variant.get("dependencyConstraints")
+                if constraints:
+                    variant["dependencyConstraints"] = [
+                        c for c in constraints
+                        if not (c.get("group", "").startswith(PREFIX) and not present(
+                            out, c["group"], c.get("module", ""), (c.get("version") or {}).get("requires", "")))
+                    ]
+                    for c in constraints:
+                        if c not in variant["dependencyConstraints"]:
+                            pruned.setdefault(where, set()).add(f"constraint on {c.get('module')}")
+                    if not variant["dependencyConstraints"]:
+                        del variant["dependencyConstraints"]
+                kept.append(variant)
+            metadata["variants"] = kept
+            with open(module_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+        pom_path = os.path.join(directory, stem + ".pom")
+        tree = ET.parse(pom_path)
+        managed = tree.getroot().find(f"{q('dependencyManagement')}/{q('dependencies')}")
+        if managed is not None:
+            changed = False
+            for dependency in list(managed.findall(q("dependency"))):
+                d_group = text_of(dependency, "groupId")
+                if d_group.startswith(PREFIX) and not present(out, d_group, text_of(dependency, "artifactId"), text_of(dependency, "version")):
+                    managed.remove(dependency)
+                    pruned.setdefault(where, set()).add(f"constraint on {text_of(dependency, 'artifactId')}")
+                    changed = True
+            if changed:
+                tree.write(pom_path, encoding="UTF-8", xml_declaration=True)
+    for where, what in sorted(pruned.items()):
+        print(f"prune {where}: {', '.join(sorted(what))}")
+    print(f"pruned what is not staged from {len(pruned)} component(s)")
 
 
 def rename_versions(out, suffix):

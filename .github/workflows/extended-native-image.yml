@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: afda8fae507702c6e0cea49d0fa7108b8c8608e6
+  CORE_EXTENDED_REF: b0b946b2324b7928ac2ebe6c5fd53bcdf111f1a5
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's Compose is built from CORE_EXTENDED_REF (.github/actions/core-compose).
   PLUGIN_VERSION: 1.11.1-ext.1-dev
@@ -262,9 +262,10 @@ jobs:
           ref: ${{ env.CORE_EXTENDED_REF }}
           targets: desktop
 
-      # skiko-awt with the AWT switch, under the version Compose asks for, so the AWT-free images
-      # resolve it from mavenLocal. Without it skiko's look-and-feel branch keeps the Java toolkit
-      # in the image, and packageNativeImage refuses an AWT-free build.
+      # skiko-awt with the AWT switch, published by the core fork as 0.144.6.1, a version above
+      # the 0.144.6 Compose asks for; the AWT-free samples name it, so it is the one they resolve.
+      # Without it skiko's look-and-feel branch keeps the Java toolkit in the image, and
+      # packageNativeImage refuses an AWT-free build.
       - name: skiko-awt with the AWT switch to mavenLocal
         shell: bash
         run: bash core-extended/extended/skiko/build-skiko-awt.sh "$RUNNER_TEMP/skiko-awt"

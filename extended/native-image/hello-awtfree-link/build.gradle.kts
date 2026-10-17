@@ -20,6 +20,10 @@ dependencies {
     implementation("org.thisisthepy.compose.window:$windowArtifact:0.1.0")
     // skiko is linked into every image this plugin makes; the sample draws nothing with it.
     implementation(compose.desktop.currentOs)
+    // skiko-awt with the AWT switch, from compose-multiplatform-core-extended's
+    // extended/skiko/build-skiko-awt.sh. Its version sorts above the 0.144.6 Compose asks for, so
+    // it is the one the image takes.
+    implementation("org.jetbrains.skiko:skiko-awt:0.144.6.1")
 }
 
 compose.desktop.application {

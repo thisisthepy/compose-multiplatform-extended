@@ -212,10 +212,13 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
 
     val main = target.compilations.getByName("main")
     // The program's own sources: not the entries generated for its other executables, which are
-    // added to the same compilation and are another task's output.
+    // added to the same compilation and are another task's output. Read when the task runs: the
+    // Kotlin Gradle plugin adds commonMain to the compilation after this project is evaluated.
     val generatedEntries = project.layout.buildDirectory.dir("generated/msvcEntry").get().asFile
-    val sourceDirs = main.allKotlinSourceSets.flatMap { it.kotlin.srcDirs }
-        .filterNot { it.toPath().startsWith(generatedEntries.toPath()) }
+    val sourceDirs = project.provider {
+        main.allKotlinSourceSets.flatMap { it.kotlin.srcDirs }
+            .filterNot { it.toPath().startsWith(generatedEntries.toPath()) }
+    }
     val generate = project.tasks.register("generateMsvcEntry$name", GenerateMsvcEntry::class.java) {
         it.entryPoint.set(project.provider { executable.entryPoint ?: "main" })
         it.symbol.set(symbol)

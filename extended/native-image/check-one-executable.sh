@@ -157,7 +157,13 @@ cat "$log"
 [[ "$(ls -A "$scratch/run")" == "$name" ]] || fail "the executable left files beside itself" "$(ls -A "$scratch/run")"
 grep -q "text self-check: ok" "$log" ||
     fail "the executable did not lay Korean text out correctly with no ICU data file" "Its own report is above."
+grep -q "inked [1-9][0-9]* pixels" "$log" || fail "the executable did not say it drew the sample text" "Its own report is above."
 [[ -s "$png" ]] || fail "the executable drew no PNG at $png"
+# A Java exception the application survived is still a lookup the image is missing (JNI or
+# reflection metadata), and it would fail somewhere a user is watching.
+if grep -E '^(java|kotlin|org)\.[A-Za-z0-9_.$]*(Exception|Error)\b' "$log"; then
+    fail "the executable reported an exception, which the image's metadata has to cover" "Its own report is above."
+fi
 [[ "$status" -eq 0 ]] || fail "the executable did not run to the end on its own (exit $status)"
 
 echo "ok    $name is one executable: system libraries only, Korean laid out with no ICU data file"

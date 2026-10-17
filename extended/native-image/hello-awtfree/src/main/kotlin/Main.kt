@@ -2,6 +2,7 @@ package awtfree
 
 import java.io.File
 import kotlin.system.exitProcess
+import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Surface
@@ -25,6 +26,16 @@ fun main() {
         val surface = Surface.makeRasterN32Premul(480, 240)
         surface.canvas.clear(Color.WHITE)
         sampleParagraph(440f).paint(surface.canvas, 20f, 20f)
+        // Text that laid out but drew nothing would pass the layout check; count what it drew.
+        val bitmap = Bitmap().apply { allocN32Pixels(480, 240) }
+        surface.readPixels(bitmap, 0, 0)
+        var inked = 0
+        for (y in 0 until 240) for (x in 0 until 480) if (bitmap.getColor(x, y) != Color.WHITE) inked++
+        if (inked == 0) {
+            System.err.println("self-check: the sample text drew no pixels")
+            exitProcess(1)
+        }
+        println("self-check: the sample text inked $inked pixels")
         val png = surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)
             ?: run { System.err.println("self-check: Skia did not encode the PNG"); exitProcess(1) }
         File(check).writeBytes(png.bytes)

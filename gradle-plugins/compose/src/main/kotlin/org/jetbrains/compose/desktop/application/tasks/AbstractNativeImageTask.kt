@@ -277,6 +277,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (library in listOf("stdc++", "GL", "X11", "Xext", "Xi", "Xrender", "Xtst", "fontconfig", "dl", "m", "pthread")) {
             linker("-l$library")
         }
+        // JetBrains' Skia for Linux arm64 finds GL through EGL, so an image that draws with GL
+        // there links it.
+        if (currentArch == Arch.Arm64) linker("-lEGL")
         return linked to link
     }
 
@@ -568,9 +571,11 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             // Turns on AwtFreeSubstitutions, which cut skiko's Swing frame watcher and dispatcher.
             "-Dcompose.nativeimage.awtFree=true",
             "-H:+UnlockExperimentalVMOptions",
-            "-H:ReportAnalysisForbiddenType=${NativeImageNoAwt.forbiddenTypes.joinToString(",")}",
-            "-H:-UnlockExperimentalVMOptions",
-        )
+        ) +
+            // One option per type: the option does not split its value at commas, so a joined
+            // list names one type that does not exist and forbids nothing.
+            NativeImageNoAwt.forbiddenTypes.map { "-H:ReportAnalysisForbiddenType=$it" } +
+            "-H:-UnlockExperimentalVMOptions"
     }
 
     /**

@@ -246,7 +246,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends \
-            build-essential pkg-config xvfb xauth libgl1-mesa-dev libgl1-mesa-dri \
+            build-essential pkg-config xvfb xauth libgl1-mesa-dev libegl-dev libgl1-mesa-dri \
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
             libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb
 

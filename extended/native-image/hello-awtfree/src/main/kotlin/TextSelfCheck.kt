@@ -1,5 +1,6 @@
 package awtfree
 
+import org.jetbrains.skia.Color
 import org.jetbrains.skia.FontMgr
 import org.jetbrains.skia.paragraph.FontCollection
 import org.jetbrains.skia.paragraph.Paragraph
@@ -87,7 +88,9 @@ private val fonts by lazy { FontCollection().setDefaultFontManager(FontMgr.defau
 
 private fun layout(text: String, width: Float): Paragraph {
     val style = ParagraphStyle()
-    style.textStyle = TextStyle().setFontSize(16f)
+    // Skia's paragraph text is white unless told otherwise, which on the white drawing
+    // surface would ink nothing.
+    style.textStyle = TextStyle().setFontSize(16f).setColor(Color.BLACK)
     return ParagraphBuilder(style, fonts).addText(text).build().layout(width)
 }
 

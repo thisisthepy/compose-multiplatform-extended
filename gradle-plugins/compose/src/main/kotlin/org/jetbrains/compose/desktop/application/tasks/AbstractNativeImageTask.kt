@@ -24,6 +24,7 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
+import org.jetbrains.compose.desktop.application.internal.NativeImageNoAwt
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentArch
@@ -163,7 +164,10 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             "-Dcompose.nativeimage.staticLibraries=${linked.joinToString(",")}",
         )
         metadataDirectory.orNull?.asFile?.takeIf { it.isDirectory }?.let {
-            args += "-H:ConfigurationFileDirectories=${it.absolutePath}"
+            // An AwtFree image is built from the metadata with every AWT entry taken out of a copy,
+            // so a run of the agent on an AWT window cannot make AWT reachable.
+            val directory = if (awt) it else workDir.resolve("metadata").also { copy -> NativeImageNoAwt.cleanMetadataDirectory(it, copy) }
+            args += "-H:ConfigurationFileDirectories=${directory.absolutePath}"
         }
         args += link
         if (!awt) {
@@ -242,7 +246,10 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         // sun.font declares a Windows-only native, and the prefix that makes sun.font built in
         // makes the image refer to it.
-        val stubs = compileC(graalvm, foreignStubs(skikoArchive, listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows")), "foreign_stubs")
+        // Only an AWT image makes sun.font built in; an AwtFree one has no such reference, and
+        // the post-link check would rightly find the name.
+        val sunFontStubs = if (awt) listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows") else emptyList()
+        val stubs = compileC(graalvm, foreignStubs(skikoArchive, sunFontStubs), "foreign_stubs")
         val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
         val linked = if (awt) listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
@@ -444,12 +451,16 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     /** The feature and substitutions, compiled by the GraalVM doing the build. */
     private fun buildSupportJar(graalvm: File): File {
         val sources = workDir.resolve("support/src/org/jetbrains/compose/nativeimage").apply { mkdirs() }
-        for (name in listOf("LinkedLibraries", "StaticDesktopLibrariesFeature", "Substitutions")) {
+        val names = listOf("LinkedLibraries", "StaticDesktopLibrariesFeature", "Substitutions") +
+            if (windowing.get() == ApplicationWindowing.AwtFree) listOf("AwtFreeSubstitutions") else emptyList()
+        for (name in names) {
             sources.resolve("$name.java").writeText(resourceText("$name.java.txt"))
         }
         val classes = workDir.resolve("support/classes").apply { mkdirs() }
         run(
             listOf(graalvm.resolve("bin/javac").absolutePath, "-d", classes.absolutePath, "--add-modules", "org.graalvm.nativeimage") +
+                // The AwtFree substitutions name Kotlin and skiko types, which the application's own classpath holds.
+                (if ("AwtFreeSubstitutions" in names) listOf("-cp", runtimeClasspath.files.joinToString(File.pathSeparator)) else emptyList()) +
                 sources.listFiles()!!.map { it.absolutePath },
             workDir.resolve("javac.log"),
         )
@@ -535,8 +546,8 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * (`extended/skiko/build-skiko-awt.sh`) puts the branch behind `AwtSwitch.available`, which
      * is a constant once the class is initialised at build time with `-Dcompose.awt=false`.
      *
-     * The toolkit and `Component` are also made forbidden types, so anything else that reaches
-     * AWT stops the build with the path that reached it, instead of an image that quietly carries
+     * The roots of AWT and Swing ([NativeImageNoAwt.forbiddenTypes]) are also made forbidden
+     * types, so anything else that reaches AWT stops the build with the path that reached it, instead of an image that quietly carries
      * AWT's libraries beside it.
      */
     private fun awtFreeArguments(): List<String> {
@@ -554,9 +565,10 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         return listOf(
             "-Dcompose.awt=false",
             "--initialize-at-build-time=org.jetbrains.skiko.AwtSwitch",
+            // Turns on AwtFreeSubstitutions, which cut skiko's Swing frame watcher and dispatcher.
+            "-Dcompose.nativeimage.awtFree=true",
             "-H:+UnlockExperimentalVMOptions",
-            "-H:ReportAnalysisForbiddenType=java.awt.Toolkit",
-            "-H:ReportAnalysisForbiddenType=java.awt.Component",
+            "-H:ReportAnalysisForbiddenType=${NativeImageNoAwt.forbiddenTypes.joinToString(",")}",
             "-H:-UnlockExperimentalVMOptions",
         )
     }

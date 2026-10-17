@@ -1,0 +1,285 @@
+# Publishes the Gradle plugins to Maven Central (through the Sonatype Central Portal), with
+# their plugin marker artifacts, and to the Gradle Plugin Portal.
+#
+# Two modes, one set of jobs:
+# - dry run (a pull request, or a manual run with no tag): builds every publication, signs it
+#   with a key made in the job and thrown away after, and checks the bundle the way Central
+#   would (extended/publish/central_bundle.py), plugin markers included. Nothing leaves the
+#   runner except the bundle, kept as a workflow artifact. The Plugin Portal is not asked
+#   anything: publishPlugins --validate-only sends the plugin to the Portal with an API key
+#   to be checked there, so a dry run without credentials cannot run it.
+# - release (a tag v<version>, or a manual run naming one): the same, signed with the release
+#   key, uploaded to the Central Portal, and then published to the Plugin Portal. The tag must
+#   sit on a merge commit on extended's first-parent line and name deploy.version: merging
+#   into extended is the release, and that merge is the owner's.
+#
+# Secrets a release reads (a dry run reads none):
+#   MAVEN_GPG_PRIVATE_KEY   the signing key, ASCII armoured (gpg --armor --export-secret-keys)
+#   MAVEN_GPG_PASSPHRASE    its passphrase
+#   CENTRAL_TOKEN_USERNAME  the Central Portal user token's username half
+#   CENTRAL_TOKEN_PASSWORD  the Central Portal user token's password half
+#   GRADLE_PUBLISH_KEY      the Gradle Plugin Portal API key
+#   GRADLE_PUBLISH_SECRET   its secret
+# The upload jobs run in the environments maven-central and gradle-plugin-portal, where
+# required reviewers can be set.
+name: Extended Maven Central
+
+on:
+  push:
+    tags:
+      - 'v*-ext.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (v1.11.1-ext.N). Empty runs the dry run on the chosen branch.
+        required: false
+        default: ''
+      publishing_type:
+        description: USER_MANAGED waits in the Central Portal for someone to press Publish; AUTOMATIC publishes once validated.
+        type: choice
+        options: [ USER_MANAGED, AUTOMATIC ]
+        default: USER_MANAGED
+  pull_request:
+    paths:
+      - extended/publish/**
+      - gradle-plugins/**
+      - '!gradle-plugins/compose/src/test/**'
+      - .github/workflows/extended-maven-central.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.tag || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # The coordinates a release must carry. Every plugin a jar declares must also have its
+  # marker in the bundle, which the check finds by itself.
+  REQUIRED: >-
+    org.thisisthepy.compose:compose-gradle-plugin
+    org.thisisthepy.compose:org.thisisthepy.compose.gradle.plugin
+
+jobs:
+  plan:
+    name: Decide dry run or release
+    runs-on: ubuntu-24.04
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      ref: ${{ steps.plan.outputs.ref }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            extended/publish
+            gradle-plugins/gradle.properties
+          sparse-checkout-cone-mode: false
+
+      - name: Test the bundle tool
+        run: extended/publish/tests/central-bundle.test.sh
+
+      - name: Work out the mode, the ref and the version
+        id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag=""
+          if [[ "$EVENT" == push && "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+          elif [[ "$EVENT" == workflow_dispatch && -n "$INPUT_TAG" ]]; then
+            tag="$INPUT_TAG"
+          fi
+          if [[ -z "$tag" ]]; then
+            version="$(sed -n 's/^deploy\.version=//p' gradle-plugins/gradle.properties)"
+            echo "dry run of $GITHUB_SHA at $version"
+            { echo "release=false"; echo "ref=$GITHUB_SHA"; echo "version=$version"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch --quiet --force origin "refs/tags/$tag:refs/tags/$tag" extended
+          commit="$(git rev-parse "refs/tags/$tag^{commit}")"
+          parents="$(git rev-list --parents -n 1 "$commit" | wc -w)"
+          if [[ "$parents" -ne 3 ]]; then
+            echo "::error::$tag is on $commit, which is not a merge commit; a release is the merge into extended"
+            exit 1
+          fi
+          if ! git rev-list --first-parent origin/extended | grep -qx "$commit"; then
+            echo "::error::$tag is on $commit, which is not on extended's first-parent line"
+            exit 1
+          fi
+          version="$(git show "$commit:gradle-plugins/gradle.properties" | sed -n 's/^deploy\.version=//p')"
+          if [[ "$tag" != "v$version" ]]; then
+            echo "::error::$tag does not name deploy.version at $commit ($version)"
+            exit 1
+          fi
+          echo "release $tag: $commit at $version"
+          { echo "release=true"; echo "ref=$commit"; echo "version=$version"; } >> "$GITHUB_OUTPUT"
+
+  bundle:
+    name: Build, sign and check the Central bundle
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      # Every publication the build has: the plugin, its marker, and the libraries beside it.
+      # The javadoc jars are java's own (withJavadocJar); the sources are Kotlin, so they hold
+      # little more than the package layout.
+      - name: Publish to the local repository
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon publishToMavenLocal
+
+      - name: Stage
+        run: |
+          python3 -I extended/publish/central_bundle.py stage \
+            --from ~/.m2/repository \
+            --out "$RUNNER_TEMP/staging" \
+            --project thisisthepy/compose-multiplatform-extended
+          find "$RUNNER_TEMP/staging" -name '*.pom' | sed "s|$RUNNER_TEMP/staging/||" | sort
+
+      - name: A signing key for this run only
+        if: needs.plan.outputs.release != 'true'
+        run: |
+          echo "GNUPGHOME=$RUNNER_TEMP/gnupg" >> "$GITHUB_ENV"
+          extended/publish/throwaway-key.sh "$RUNNER_TEMP/gnupg"
+
+      - name: The release signing key
+        if: needs.plan.outputs.release == 'true'
+        env:
+          MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$MAVEN_GPG_PRIVATE_KEY" ]] || { echo "::error::the MAVEN_GPG_PRIVATE_KEY secret is not set"; exit 1; }
+          mkdir -m 700 "$RUNNER_TEMP/gnupg"
+          echo "GNUPGHOME=$RUNNER_TEMP/gnupg" >> "$GITHUB_ENV"
+          GNUPGHOME="$RUNNER_TEMP/gnupg" gpg --batch --import <<< "$MAVEN_GPG_PRIVATE_KEY"
+
+      - name: Sign and checksum
+        env:
+          GPG_PASSPHRASE: ${{ needs.plan.outputs.release == 'true' && secrets.MAVEN_GPG_PASSPHRASE || '' }}
+        run: python3 -I extended/publish/central_bundle.py sign "$RUNNER_TEMP/staging"
+
+      - name: Check the bundle as Central would, plugin markers included
+        shell: bash
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          required=()
+          for coordinate in $REQUIRED; do required+=(--require "$coordinate"); done
+          python3 -I extended/publish/central_bundle.py validate "$RUNNER_TEMP/staging" \
+            --version "$VERSION" --verify-signatures "${required[@]}"
+
+      - name: Check the plugin marker POMs point at the plugin
+        shell: bash
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          markers="$(find "$RUNNER_TEMP/staging" -name "*.gradle.plugin-$VERSION.pom")"
+          [[ -n "$markers" ]] || { echo "::error::no plugin marker POM in the bundle"; exit 1; }
+          for pom in $markers; do
+            python3 -I - "$pom" "$RUNNER_TEMP/staging" "$VERSION" <<'PY'
+          import os, sys
+          import xml.etree.ElementTree as ET
+          pom, staging, version = sys.argv[1:]
+          ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+          root = ET.parse(pom).getroot()
+          assert root.findtext("m:packaging", namespaces=ns) == "pom", f"{pom}: a marker's packaging is pom"
+          deps = root.findall("m:dependencies/m:dependency", ns)
+          assert len(deps) == 1, f"{pom}: a marker names exactly one implementation, it names {len(deps)}"
+          group, artifact, ver = (deps[0].findtext(f"m:{k}", namespaces=ns) for k in ("groupId", "artifactId", "version"))
+          assert ver == version, f"{pom}: the marker names {ver}, not {version}"
+          path = os.path.join(staging, *group.split("."), artifact, ver, f"{artifact}-{ver}.jar")
+          assert os.path.isfile(path), f"{pom}: the implementation {group}:{artifact}:{ver} is not in the bundle"
+          print(f"ok    {os.path.basename(pom)} -> {group}:{artifact}:{ver}")
+          PY
+          done
+
+      - name: Zip the bundle
+        run: python3 -I extended/publish/central_bundle.py zip "$RUNNER_TEMP/staging" "$RUNNER_TEMP/central-bundle.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: central-bundle
+          path: ${{ runner.temp }}/central-bundle.zip
+          retention-days: 14
+
+  central:
+    name: Upload to the Central Portal
+    needs: [ plan, bundle ]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    environment: maven-central
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          sparse-checkout: extended/publish
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: central-bundle
+          path: ${{ runner.temp }}
+
+      - name: Upload
+        env:
+          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
+          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          TYPE: ${{ inputs.publishing_type || 'USER_MANAGED' }}
+        run: |
+          extended/publish/central-upload.sh "$RUNNER_TEMP/central-bundle.zip" \
+            "compose-multiplatform-extended $VERSION" "$TYPE"
+
+  plugin-portal:
+    name: Publish to the Gradle Plugin Portal
+    needs: [ plan, central ]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: gradle-plugin-portal
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      # com.gradle.plugin-publish reads the key and secret from these two variables, and
+      # publishes every plugin the build declares, at deploy.version.
+      - name: publishPlugins
+        working-directory: gradle-plugins
+        env:
+          GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
+          GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GRADLE_PUBLISH_KEY" && -n "$GRADLE_PUBLISH_SECRET" ]] ||
+            { echo "::error::GRADLE_PUBLISH_KEY and GRADLE_PUBLISH_SECRET must be set"; exit 1; }
+          ./gradlew --no-daemon publishPlugins

@@ -70,9 +70,13 @@ jobs:
         run: |
           vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           "$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath -property installationVersion
-          for root in $("$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | tr -d '\r' | sed 's|\\|/|g'); do
-            ls "$root/VC/Tools/MSVC"
-          done
+          # One installation per line; the paths have spaces ("Program Files"), so they are read
+          # whole rather than split by the shell.
+          "$vswhere" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath |
+            tr -d '\r' | sed 's|\\|/|g' |
+            while IFS= read -r root; do
+              find "$root/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d
+            done
 
       - name: Link hello-plain
         working-directory: extended/native-desktop/hello-plain
@@ -94,7 +98,7 @@ jobs:
           set -euo pipefail
           vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           root="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r' | sed 's|\\|/|g')"
-          dumpbin="$(ls "$root"/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe | tail -1)"
+          dumpbin="$(find "$root/VC/Tools/MSVC" -path '*/bin/Hostx64/x64/dumpbin.exe' | sort | tail -1)"
           "$dumpbin" /nologo /dependents build/bin/mingwX64/releaseExecutable/hello.exe | tee dumpbin.log
           # Only parts of Windows: no MinGW or Visual C++ runtime DLL beside the executable.
           ! grep -iE 'libstdc|libgcc|libwinpthread|vcruntime|msvcp' dumpbin.log

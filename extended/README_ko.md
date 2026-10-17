@@ -16,7 +16,7 @@ Compose Gradle 플러그인의 저장소인
 - 애플리케이션 하나, 출력 셋: `output = ApplicationOutput.Jvm`, `NativeImage`, `KotlinNative`. 이름, 버전, 제작사, 아이콘, 리소스는 `nativeDistributions` 에 한 번만 적습니다.
 - `packageNativeImage`: 애플리케이션을 GraalVM native-image 실행 파일 하나로 만듭니다. 옆에 Java 런타임이 없습니다 (macOS arm64, Linux x64, Windows x64).
 - `runNativeImageAgent`: 이미지를 빌드할 때 쓰는 reachability 메타데이터를 기록합니다.
-- AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다.
+- AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다. 창 C 계층(macOS 의 `appkit_window.m`, Linux 의 `x11_window.c`)은 이미지에 컴파일되어 링크되며, CI 의 "Extended native image" 워크플로 중 "Package (macos-arm64)" 와 "Package (linux-x64)" 잡이 그 이미지를 빌드하고 실행합니다. Windows 는 아직 구현되지 않았습니다. 공유 Win32 창 계층은 core-extended [#32](https://github.com/thisisthepy/compose-multiplatform-core-extended/pull/32) 와 compose-rust [#174](https://github.com/DarkPyonix/compose-rust/pull/174) 에서 열려 있습니다.
 - macOS, Linux, Windows 용 Kotlin/Native 데스크톱 패키징 태스크. 업스트림의 `TargetFormat` 이름을 그대로 씁니다. 병합되어 단위 테스트를 거쳤지만 아직 CI 에서 빌드하지는 않았습니다. 실제 앱을 링크하고 패키징하는 CI 셀은 [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26) 에 있습니다. 형식별 상태는 아래 "Kotlin/Native 앱 종류별 출력" 을 보십시오.
 - 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
 - 모든 출력의 실행 태스크, 그리고 배율이 적용된 화면에서 DPI 를 인식하는 Windows 애플리케이션.

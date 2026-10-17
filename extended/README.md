@@ -21,7 +21,12 @@ the fork of the Compose libraries.
   runtime beside it (macOS arm64, Linux x64, Windows x64).
 - `runNativeImageAgent`: records the reachability metadata the image is built from.
 - AWT-free windows: with `windowing = ApplicationWindowing.AwtFree` the window comes from the
-  extended window modules, not from the JDK's AWT.
+  extended window modules, not from the JDK's AWT. The window C layers (`appkit_window.m` on
+  macOS, `x11_window.c` on Linux) are compiled and linked into the image, and CI builds and starts
+  that image in the "Package (macos-arm64)" and "Package (linux-x64)" jobs of the "Extended native
+  image" workflow. Windows is not implemented yet: its shared Win32 window layer is open in
+  core-extended [#32](https://github.com/thisisthepy/compose-multiplatform-core-extended/pull/32)
+  and compose-rust [#174](https://github.com/DarkPyonix/compose-rust/pull/174).
 - Kotlin/Native desktop packaging tasks for macOS, Linux and Windows, with upstream's own
   `TargetFormat` names. They are merged and unit tested, and not yet built on CI: the CI cells
   that link and package a real app are in [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26).

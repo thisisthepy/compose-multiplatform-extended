@@ -29,15 +29,22 @@ import java.nio.ByteOrder
  *    only. In a whole program built as one object, names repeat and the name alone pairs some
  *    unwind data with the wrong code, which MSVC's linker refuses ("invalid .pdata
  *    contributions").
+ * 3. Shared unwind data. Functions that LLVM places in COMDAT sections named plain `.text` all
+ *    get their unwind entries in one `.pdata$` (and one `.xdata$`), which MinGW's linker keeps
+ *    whole. MSVC's linker cannot tie one COMDAT to many, so those sections stop being COMDATs:
+ *    the shared unwind data and the code it covers, when that code is a COMDAT nothing may
+ *    duplicate (selection "no duplicates"), become ordinary sections that are always linked.
  *
  * Both the ordinary COFF layout and the "big object" layout (32-bit section numbers, which
  * Kotlin/Native writes once an object has more sections than 16 bits can number) are handled.
  */
 object CoffMingwFixer {
-    data class Result(val constructorSections: Int, val associativeUnwindSections: Int)
+    data class Result(val constructorSections: Int, val associativeUnwindSections: Int, val sharedUnwindSections: Int = 0)
 
     private const val CRT_CHARACTERISTICS = 0x40400040
+    private const val SELECT_NODUPLICATES = 1
     private const val SELECT_ASSOCIATIVE = 5
+    private const val SCN_LNK_COMDAT = 0x1000
     private const val MACHINE_AMD64 = 0x8664
 
     private class Layout(
@@ -59,6 +66,7 @@ object CoffMingwFixer {
         var pos = 8
         var ctors = 0
         var associated = 0
+        var shared = 0
         while (pos + 60 <= bytes.size) {
             val size = String(bytes, pos + 48, 10, Charsets.ISO_8859_1).trim().toIntOrNull() ?: break
             val body = pos + 60
@@ -66,10 +74,11 @@ object CoffMingwFixer {
                 val result = patchObject(buf, body)
                 ctors += result.constructorSections
                 associated += result.associativeUnwindSections
+                shared += result.sharedUnwindSections
             }
             pos = body + size + (size and 1)
         }
-        return Result(ctors, associated)
+        return Result(ctors, associated, shared)
     }
 
     private fun layout(buf: ByteBuffer, base: Int): Layout? {
@@ -141,7 +150,16 @@ object CoffMingwFixer {
         val textIndex = HashMap<String, Int>()
         names.forEachIndexed { i, n -> if (n.startsWith(".text$")) textIndex[n.removePrefix(".text$")] = i + 1 }
         if ("" !in textIndex) names.indexOf(".text").let { if (it >= 0) textIndex[""] = it + 1 }
-        val codeOf = unwindTargets(buf, l, names)
+        val (codeOf, sharedUnwind) = unwindTargets(buf, l, names)
+        var shared = 0
+        if (sharedUnwind.isNotEmpty()) {
+            val selection = comdatSelections(buf, l, names.size)
+            for ((unwind, code) in sharedUnwind) {
+                for (section in unwind) clearComdat(buf, l, section)
+                for (section in code) if (selection[section] == SELECT_NODUPLICATES) clearComdat(buf, l, section)
+                shared += unwind.size
+            }
+        }
         var associated = 0
         var i = 0
         while (i < l.symbolCount) {
@@ -165,7 +183,7 @@ object CoffMingwFixer {
                     if (!name.startsWith(prefix)) continue
                     val target = codeOf[sectionNumber] ?: textIndex[name.removePrefix(prefix)]
                     val characteristics = buf.getInt(l.sectionTable + (sectionNumber - 1) * 40 + 36)
-                    if (target != null && (characteristics and 0x1000) != 0) {
+                    if (target != null && (characteristics and SCN_LNK_COMDAT) != 0) {
                         val a = at + l.symbolSize
                         buf.putShort(a + 12, (target and 0xFFFF).toShort())
                         buf.put(a + 14, SELECT_ASSOCIATIVE.toByte())
@@ -176,7 +194,28 @@ object CoffMingwFixer {
             }
             i += 1 + aux
         }
-        return Result(ctors, associated)
+        return Result(ctors, associated, shared)
+    }
+
+    private fun clearComdat(buf: ByteBuffer, l: Layout, section: Int) {
+        val at = l.sectionTable + (section - 1) * 40 + 36
+        buf.putInt(at, buf.getInt(at) and SCN_LNK_COMDAT.inv())
+    }
+
+    /** The COMDAT selection of each section that has one, from its section symbol's aux record. */
+    private fun comdatSelections(buf: ByteBuffer, l: Layout, sections: Int): Map<Int, Int> {
+        val out = HashMap<Int, Int>()
+        val big = l.symbolSize == 20
+        var i = 0
+        while (i < l.symbolCount) {
+            val at = l.symbolTable + i * l.symbolSize
+            val section = if (big) buf.getInt(at + 12) else buf.getShort(at + 12).toInt()
+            val storage = buf.get(at + if (big) 18 else 16).toInt() and 0xFF
+            val aux = buf.get(at + if (big) 19 else 17).toInt() and 0xFF
+            if (storage == 3 && aux != 0 && section in 1..sections) out[section] = buf.get(at + l.symbolSize + 14).toInt() and 0xFF
+            i += 1 + aux
+        }
+        return out
     }
 
     /** Section number of a symbol, by its index in the symbol table. */
@@ -209,20 +248,31 @@ object CoffMingwFixer {
      * For each `.pdata$` and `.xdata$` section, the code section it unwinds: what the first entry of
      * the `.pdata` points into, and for an `.xdata`, the code of a `.pdata` entry pointing at it.
      */
-    private fun unwindTargets(buf: ByteBuffer, l: Layout, names: List<String>): Map<Int, Int> {
+    private fun unwindTargets(
+        buf: ByteBuffer,
+        l: Layout,
+        names: List<String>,
+    ): Pair<Map<Int, Int>, List<Pair<Set<Int>, Set<Int>>>> {
         val targets = HashMap<Int, Int>()
+        val shared = ArrayList<Pair<Set<Int>, Set<Int>>>()
         names.forEachIndexed { i, name ->
             if (!name.startsWith(".pdata$")) return@forEachIndexed
             val section = i + 1
             val relocations = relocations(buf, l, section)
-            val code = relocations.firstOrNull { it.first == 0 }?.let { symbolSection(buf, l, it.second) } ?: 0
-            if (code <= 0 || code > names.size) return@forEachIndexed
-            targets[section] = code
-            relocations.filter { it.first == 8 }.forEach { (_, symbol) ->
-                val unwind = symbolSection(buf, l, symbol)
-                if (unwind > 0 && unwind <= names.size && names[unwind - 1].startsWith(".xdata$")) targets[unwind] = code
+            // Each entry is 12 bytes: the function's start, its end, its unwind information.
+            val code = relocations.filter { it.first % 12 == 0 }.map { symbolSection(buf, l, it.second) }
+                .filter { it in 1..names.size }.toSet()
+            val unwind = relocations.filter { it.first % 12 == 8 }.map { symbolSection(buf, l, it.second) }
+                .filter { it in 1..names.size && names[it - 1].startsWith(".xdata$") }.toSet()
+            when (code.size) {
+                0 -> return@forEachIndexed
+                1 -> {
+                    targets[section] = code.single()
+                    unwind.forEach { targets[it] = code.single() }
+                }
+                else -> shared += (setOf(section) + unwind) to code
             }
         }
-        return targets
+        return targets to shared
     }
 }

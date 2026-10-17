@@ -3,10 +3,12 @@
 
 Usage:
   central_bundle.py stage    --from <repo> [--from <repo>...] --out <dir> [--project <owner/repo>]
-  central_bundle.py sign     <dir> [--key <id>]
-  central_bundle.py validate <dir> [--version <v>] [--require <group:artifact>...]
-                                   [--verify-signatures]
+                             [--dev-suffix=<-dev.sha>]
+  central_bundle.py sign     <dir> [--key <id>] [--checksums-only]
+  central_bundle.py validate <dir> [--version <v> | --dev=<-dev.sha>] [--require <group:artifact>...]
+                                   [--verify-signatures | --unsigned]
   central_bundle.py zip      <dir> <bundle.zip>
+  central_bundle.py put      <dir> <repository url>
 
 The build stays where it is (publish-local.sh, the Amper window modules, the Gradle plugin
 build); this tool only reads the Maven repositories they wrote to. It is the same file in
@@ -21,9 +23,15 @@ stage    copies every component under org/thisisthepy from each repository into 
          url and scm always name the repository the artifacts are built from, since that is
          where their sources are. A component that is not a bare POM gets an empty javadoc
          jar when it has none, and an empty sources jar when it has none; both are listed.
+         With --dev-suffix every staged version V becomes V<suffix>, everywhere it is named:
+         directories, file names, each POM's own version and the versions of the fork's
+         artifacts it depends on, and in each Gradle module the component, its variants'
+         available-at targets, file names and urls, and dependency versions. A reference left
+         at V would send a consumer of the dev build back to the release.
 sign     writes .md5, .sha1, .sha256 and .sha512 beside every file, and an ASCII-armoured
          detached signature (.asc) made with gpg, which must hold the secret key already.
-         GPG_PASSPHRASE, when set, is the key's passphrase.
+         GPG_PASSPHRASE, when set, is the key's passphrase. --checksums-only writes the
+         checksums and no signatures, for a repository that does not ask for them.
 validate checks <dir> the way Central's validation does, and a little more:
          - every group is under org.thisisthepy and matches the POM, which names the
            artifact and version of its directory;
@@ -39,8 +47,15 @@ validate checks <dir> the way Central's validation does, and a little more:
            sends a consumer to a coordinate nobody published;
          - every Gradle plugin a jar declares has its marker POM;
          - every --require coordinate is present.
-         With --verify-signatures each .asc is checked with gpg. Exits 1 on any failure.
+         With --verify-signatures each .asc is checked with gpg; with --unsigned no .asc is
+         asked for. --dev=<suffix> checks a dev build instead of a release: every version ends
+         in <suffix>, and no POM or Gradle module names a fork artifact at any version
+         without the suffix. Exits 1 on any failure.
 zip      writes the bundle Central's upload API takes: the directory in Maven layout.
+put      uploads <dir> to a Maven repository over HTTP PUT (GitHub Packages), each component's
+         files first and its POM last, then a maven-metadata.xml per artifact that keeps the
+         versions already there. Reads MAVEN_USERNAME and MAVEN_PASSWORD. A version that is
+         already in the repository is refused by GitHub Packages, so a rerun fails loudly.
 """
 
 import argparse
@@ -52,6 +67,9 @@ import re
 import shutil
 import subprocess
 import sys
+import base64
+import urllib.error
+import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -62,6 +80,7 @@ CHECKSUMS = {"md5": hashlib.md5, "sha1": hashlib.sha1, "sha256": hashlib.sha256,
 SIDE_FILES = tuple("." + ext for ext in CHECKSUMS) + (".asc",)
 SKIPPED = ("maven-metadata", "_remote.repositories", ".lastUpdated")
 VERSION_RULE = re.compile(r"^\d+(\.\d+)*(-[A-Za-z0-9.]+)?-ext\.\d+$")
+DEV_SUFFIX = re.compile(r"^-dev\.[0-9a-f]{7,40}$")
 DEVELOPER = {"id": "thisisthepy", "name": "thisisthepy", "url": "https://github.com/thisisthepy"}
 LICENSE = {"name": "The Apache License, Version 2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"}
 
@@ -94,7 +113,7 @@ def primary_files(directory):
 
 # --- stage -------------------------------------------------------------------------------
 
-def stage(sources, out, project):
+def stage(sources, out, project, dev_suffix=None):
     os.makedirs(out, exist_ok=True)
     conflicts = []
     for source in sources:
@@ -116,6 +135,8 @@ def stage(sources, out, project):
                 shutil.copy2(src, dst)
     for line in conflicts:
         print(f"note  {line}")
+    if dev_suffix:
+        rename_versions(out, dev_suffix)
 
     url = f"https://github.com/{project}"
     added = []
@@ -131,6 +152,101 @@ def stage(sources, out, project):
     for line in added:
         print(f"empty {line}")
     print(f"staged {sum(1 for _ in components(out))} component(s) in {out}, {len(added)} empty jar(s) added")
+
+
+def rename_versions(out, suffix):
+    if not DEV_SUFFIX.match(suffix):
+        sys.exit(f"error: a dev suffix is -dev.<commit>, not '{suffix}'")
+    found = list(components(out))
+    mapping = {(g, a, v): v + suffix for g, a, v, _ in found}
+
+    def new(group, artifact, version):
+        return mapping.get((group, artifact, version), version)
+
+    for group, artifact, version, directory in found:
+        target = new(group, artifact, version)
+        old_stem, new_stem = f"{artifact}-{version}", f"{artifact}-{target}"
+        pom_path = os.path.join(directory, old_stem + ".pom")
+        tree = ET.parse(pom_path)
+        pom = tree.getroot()
+        child(pom, "version").text = target
+        for dependency in pom.iter(q("dependency")):
+            version_element = dependency.find(q("version"))
+            if version_element is not None and version_element.text:
+                version_element.text = new(text_of(dependency, "groupId"), text_of(dependency, "artifactId"),
+                                           version_element.text.strip())
+        tree.write(pom_path, encoding="UTF-8", xml_declaration=True)
+
+        module_path = os.path.join(directory, old_stem + ".module")
+        if os.path.isfile(module_path):
+            with open(module_path) as f:
+                metadata = json.load(f)
+            rename_in_module(metadata, new, old_stem, new_stem)
+            with open(module_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+
+        for name in os.listdir(directory):
+            if name.startswith(old_stem):
+                os.rename(os.path.join(directory, name), os.path.join(directory, new_stem + name[len(old_stem):]))
+        os.rename(directory, os.path.join(os.path.dirname(directory), target))
+    print(f"renamed {len(found)} component(s) to <version>{suffix}")
+
+
+def rename_reference(reference, new):
+    """A {group, module, version, url} reference to another component, as available-at and a
+    target module's component block hold."""
+    group, module, version = reference.get("group", ""), reference.get("module", ""), reference.get("version", "")
+    target = new(group, module, version)
+    if target == version:
+        return
+    reference["version"] = target
+    if "url" in reference:
+        reference["url"] = (reference["url"].replace(f"/{version}/", f"/{target}/")
+                            .replace(f"{module}-{version}.", f"{module}-{target}."))
+
+
+def rename_in_module(metadata, new, old_stem, new_stem):
+    component = metadata.get("component", {})
+    if "url" in component:
+        rename_reference(component, new)
+    else:
+        component["version"] = new(component.get("group", ""), component.get("module", ""), component.get("version", ""))
+    for variant in metadata.get("variants", []):
+        if "available-at" in variant:
+            rename_reference(variant["available-at"], new)
+        for file in variant.get("files", []):
+            for key in ("name", "url"):
+                if file.get(key, "").startswith(old_stem):
+                    file[key] = new_stem + file[key][len(old_stem):]
+        for key in ("dependencies", "dependencyConstraints"):
+            for dependency in variant.get(key, []):
+                constraint = dependency.get("version") or {}
+                for kind in ("requires", "strictly", "prefers"):
+                    if kind in constraint:
+                        constraint[kind] = new(dependency.get("group", ""), dependency.get("module", ""), constraint[kind])
+
+
+def fork_references(pom, metadata):
+    """(where, group, module, version) for every fork artifact a POM or Gradle module names."""
+    for dependency in pom.iter(q("dependency")):
+        group = text_of(dependency, "groupId")
+        if group.startswith(PREFIX):
+            yield "POM dependency", group, text_of(dependency, "artifactId"), text_of(dependency, "version")
+    if metadata is None:
+        return
+    component = metadata.get("component", {})
+    yield "module component", component.get("group", ""), component.get("module", ""), component.get("version", "")
+    for variant in metadata.get("variants", []):
+        at = variant.get("available-at")
+        if at:
+            yield f"variant {variant.get('name')}", at.get("group", ""), at.get("module", ""), at.get("version", "")
+        for key in ("dependencies", "dependencyConstraints"):
+            for dependency in variant.get(key, []):
+                constraint = dependency.get("version") or {}
+                for kind in ("requires", "strictly", "prefers"):
+                    if kind in constraint:
+                        yield (f"variant {variant.get('name')} {key[:-1] if key.endswith('s') else key}",
+                               dependency.get("group", ""), dependency.get("module", ""), constraint[kind])
 
 
 def child(parent, tag):
@@ -184,7 +300,7 @@ def empty_jar(path, classifier, coordinate):
 
 # --- sign --------------------------------------------------------------------------------
 
-def sign(out, key):
+def sign(out, key, checksums_only=False):
     passphrase = os.environ.get("GPG_PASSPHRASE")
     count = 0
     for _, _, _, directory in components(out):
@@ -195,14 +311,16 @@ def sign(out, key):
             for ext, algorithm in CHECKSUMS.items():
                 with open(f"{path}.{ext}", "w") as f:
                     f.write(algorithm(data).hexdigest())
+            count += 1
+            if checksums_only:
+                continue
             command = ["gpg", "--batch", "--yes", "--armor", "--detach-sign", "--output", f"{path}.asc"]
             if key:
                 command += ["--local-user", key]
             if passphrase:
                 command += ["--pinentry-mode", "loopback", "--passphrase-fd", "0"]
             subprocess.run(command + [path], input=(passphrase or "").encode(), check=True)
-            count += 1
-    print(f"signed and checksummed {count} file(s)")
+    print(f"{'checksummed' if checksums_only else 'signed and checksummed'} {count} file(s)")
 
 
 # --- validate ----------------------------------------------------------------------------
@@ -212,7 +330,7 @@ def present(out, group, artifact, version):
     return os.path.isfile(base + ".pom") or os.path.isfile(base + ".module")
 
 
-def validate(out, version, required, verify):
+def validate(out, version, required, verify, dev=None, unsigned=False):
     errors = []
     found = list(components(out))
     if not found:
@@ -237,7 +355,13 @@ def validate(out, version, required, verify):
                 errors.append(f"{where}: the POM's {field} is '{actual}', its directory says '{expected}'")
         if "SNAPSHOT" in ver.upper():
             errors.append(f"{where}: a SNAPSHOT version, which Central refuses")
-        elif ver.endswith("-dev"):
+        elif dev:
+            # A dev build carries whatever versions the build has (the window modules' own
+            # line among them until every line is one), each with the suffix.
+            base = ver[:-len(dev)] if ver.endswith(dev) else ""
+            if not base or "-dev" in base:
+                errors.append(f"{where}: a dev build's version is <version>{dev}")
+        elif ver.endswith("-dev") or "-dev." in ver:
             errors.append(f"{where}: a local -dev build, which is never a release")
         elif not VERSION_RULE.match(ver):
             errors.append(f"{where}: the version does not end in -ext.<N>")
@@ -276,7 +400,9 @@ def validate(out, version, required, verify):
                     content = f.read().split()
                 if not content or content[0].lower() != algorithm(data).hexdigest():
                     errors.append(f"{where}: {name}.{ext} does not match the file")
-            if not os.path.isfile(path + ".asc"):
+            if unsigned:
+                pass
+            elif not os.path.isfile(path + ".asc"):
                 errors.append(f"{where}: {name} has no .asc signature")
             elif verify:
                 result = subprocess.run(["gpg", "--batch", "--verify", path + ".asc", path], capture_output=True)
@@ -290,8 +416,19 @@ def validate(out, version, required, verify):
                     errors.append(f"{where}: depends on {d_group}:{d_artifact}:{d_version}, which is not in the bundle")
 
         module = os.path.join(directory, f"{stem}.module")
+        metadata = None
         if os.path.isfile(module):
             errors += check_module(out, where, module, directory)
+            try:
+                with open(module) as f:
+                    metadata = json.load(f)
+            except ValueError:
+                pass
+        if dev:
+            for kind, r_group, r_module, r_version in fork_references(pom, metadata):
+                if r_group.startswith(PREFIX) and r_version and not r_version.endswith(dev):
+                    errors.append(f"{where}: its {kind} names {r_group}:{r_module}:{r_version}, a fork version "
+                                  f"without {dev}, which would pull a consumer of this dev build back to a release")
 
         for name in files:
             if name.endswith(".jar"):
@@ -364,6 +501,61 @@ def bundle(out, path):
     print(f"wrote {path}: {count} file(s)")
 
 
+def put(out, url):
+    user, password = os.environ.get("MAVEN_USERNAME"), os.environ.get("MAVEN_PASSWORD")
+    if not (user and password):
+        sys.exit("error: MAVEN_USERNAME and MAVEN_PASSWORD must be set")
+    auth = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    url = url.rstrip("/")
+
+    def request(method, path, data=None):
+        req = urllib.request.Request(f"{url}/{path}", data=data, method=method, headers={"Authorization": auth})
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=300) as response:
+                    return response.read()
+            except urllib.error.HTTPError as error:
+                if method == "GET" and error.code == 404:
+                    return None
+                if error.code < 500 or attempt == 2:
+                    sys.exit(f"error: {method} {path}: HTTP {error.code} {error.read().decode(errors='replace')[:500]}")
+            except urllib.error.URLError as error:
+                if attempt == 2:
+                    sys.exit(f"error: {method} {path}: {error}")
+
+    artifacts = {}
+    count = 0
+    for group, artifact, version, directory in components(out):
+        names = sorted(os.listdir(directory), key=lambda n: (n.split(".")[-1] in CHECKSUMS or n.endswith(".asc"),
+                                                              ".pom" in n, n))
+        for name in names:
+            with open(os.path.join(directory, name), "rb") as f:
+                request("PUT", os.path.relpath(os.path.join(directory, name), out).replace(os.sep, "/"), f.read())
+            count += 1
+        artifacts.setdefault((group, artifact), []).append(version)
+        print(f"put   {group}:{artifact}:{version}")
+
+    for (group, artifact), versions in artifacts.items():
+        path = "/".join(group.split(".") + [artifact, "maven-metadata.xml"])
+        existing = request("GET", path)
+        known = []
+        if existing:
+            try:
+                known = [v.text for v in ET.fromstring(existing).iter("version") if v.text]
+            except ET.ParseError:
+                known = []
+        known += [v for v in versions if v not in known]
+        body = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<metadata>\n"
+                f"  <groupId>{group}</groupId>\n  <artifactId>{artifact}</artifactId>\n  <versioning>\n"
+                f"    <latest>{known[-1]}</latest>\n    <versions>\n"
+                + "".join(f"      <version>{v}</version>\n" for v in known)
+                + "    </versions>\n  </versioning>\n</metadata>\n").encode()
+        request("PUT", path, body)
+        for ext, algorithm in (("md5", hashlib.md5), ("sha1", hashlib.sha1)):
+            request("PUT", f"{path}.{ext}", algorithm(body).hexdigest().encode())
+    print(f"put {count} file(s) for {len(artifacts)} artifact(s) to {url}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -371,24 +563,35 @@ def main():
     p.add_argument("--from", dest="sources", action="append", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--project", default="thisisthepy/compose-multiplatform-core-extended")
+    p.add_argument("--dev-suffix")
     p = commands.add_parser("sign")
     p.add_argument("dir")
     p.add_argument("--key")
+    p.add_argument("--checksums-only", action="store_true")
     p = commands.add_parser("validate")
     p.add_argument("dir")
     p.add_argument("--version")
     p.add_argument("--require", action="append", default=[])
     p.add_argument("--verify-signatures", action="store_true")
+    p.add_argument("--unsigned", action="store_true")
+    p.add_argument("--dev")
     p = commands.add_parser("zip")
     p.add_argument("dir")
     p.add_argument("bundle")
+    p = commands.add_parser("put")
+    p.add_argument("dir")
+    p.add_argument("url")
     args = parser.parse_args()
     if args.command == "stage":
-        stage([os.path.expanduser(s) for s in args.sources], args.out, args.project)
+        stage([os.path.expanduser(s) for s in args.sources], args.out, args.project, args.dev_suffix)
     elif args.command == "sign":
-        sign(args.dir, args.key)
+        sign(args.dir, args.key, args.checksums_only)
     elif args.command == "validate":
-        return validate(args.dir, args.version, args.require, args.verify_signatures)
+        if args.dev and not DEV_SUFFIX.match(args.dev):
+            sys.exit(f"error: a dev suffix is -dev.<commit>, not '{args.dev}'")
+        return validate(args.dir, args.version, args.require, args.verify_signatures, args.dev, args.unsigned)
+    elif args.command == "put":
+        put(args.dir, args.url)
     elif args.command == "zip":
         bundle(args.dir, args.bundle)
     return 0

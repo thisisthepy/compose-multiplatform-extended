@@ -158,6 +158,85 @@ python3 -I "$tool" stage --from "$a" --from "$b" --out "$out" > "$work/log"
 [[ "$(cat "$out/org/thisisthepy/compose/ui/ui-linuxx64/$V/ui-linuxx64-$V.klib")" == klib ]] && grep -q "kept the copy" "$work/log" &&
     pass "the first repository wins a conflict, and it is reported" || fail "conflict handling"
 
+# A dev build: every version, and every reference to one, gets the suffix.
+S=-dev.0123abc
+repo="$work/dev-repo"; out="$work/dev-out"; rm -rf "$repo" "$out"
+make_repo "$repo"
+python3 -I "$tool" stage --from "$repo" --out "$out" --dev-suffix="$S" > "$work/log"
+python3 -I "$tool" sign "$out" --checksums-only > /dev/null
+if python3 -I "$tool" validate "$out" --dev="$S" --unsigned > "$work/log"; then
+    pass "a dev build validates without signatures"
+else
+    fail "a dev build does not validate"; cat "$work/log" >&2
+fi
+d="$out/org/thisisthepy/compose/ui/ui/$V$S"
+[[ -f "$d/ui-$V$S.module" && -f "$d/ui-$V$S.jar" && ! -e "$out/org/thisisthepy/compose/ui/ui/$V" ]] &&
+    pass "dev directories and file names carry the suffix" || fail "dev renaming of directories and files"
+python3 -I - "$d/ui-$V$S.module" "$V$S" <<'PY2' && pass "the dev module's component, available-at and files carry the suffix" || fail "dev module rewrite"
+import json, sys
+m = json.load(open(sys.argv[1])); v = sys.argv[2]
+assert m["component"]["version"] == v
+at = m["variants"][0]["available-at"]
+assert at["version"] == v and at["url"] == f"../../ui-linuxx64/{v}/ui-linuxx64-{v}.module", at
+assert m["variants"][1]["files"][0]["url"] == f"ui-{v}.jar"
+PY2
+grep -q "<version>$V$S</version>" "$out/org/thisisthepy/compose/ui/ui-linuxx64/$V$S/ui-linuxx64-$V$S.pom" &&
+    ! grep -q "<version>$V</version>" "$out/org/thisisthepy/compose/ui/ui-linuxx64/$V$S/ui-linuxx64-$V$S.pom" &&
+    pass "the dev POM's dependency on a fork artifact carries the suffix" || fail "dev POM rewrite"
+expect_fail "a dev build is never a release" "local -dev build" "$out" --unsigned
+
+# A reference left at the release version is caught even when that version is in the bundle.
+p="$out/org/thisisthepy/compose/ui/ui-linuxx64/$V$S/ui-linuxx64-$V$S.pom"
+sed -i.bak "s|<version>$V$S</version>|<version>$V</version>|g" "$p"; rm -f "$p.bak"
+python3 -I - "$p" "$V" "$S" <<'PY2'
+import re, sys
+path, v, s = sys.argv[1:]
+text = open(path).read()
+# the POM's own version back to dev, the dependency left at the release
+text = text.replace(f"<version>{v}</version>", f"<version>{v}{s}</version>", 1)
+open(path, "w").write(text)
+PY2
+python3 -I "$tool" sign "$out" --checksums-only > /dev/null
+expect_fail "a dev POM naming a release fork version fails" "fork version without $S" "$out" --dev="$S" --unsigned
+
+# put: files reach the server, each POM after its component's files, then maven-metadata.xml.
+out="$work/dev-out2"; rm -rf "$out"
+python3 -I "$tool" stage --from "$repo" --out "$out" --dev-suffix="$S" > /dev/null
+python3 -I "$tool" sign "$out" --checksums-only > /dev/null
+python3 -I - "$work/server.log" > "$work/port" <<'PY2' &
+import http.server, sys, threading
+log = open(sys.argv[1], "w")
+class H(http.server.BaseHTTPRequestHandler):
+    def do_PUT(self):
+        auth = self.headers.get("Authorization", "")
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        log.write(f"PUT {self.path} {auth}\n"); log.flush()
+        self.send_response(201 if auth.startswith("Basic ") else 401); self.end_headers()
+    def do_GET(self):
+        log.write(f"GET {self.path}\n"); log.flush()
+        self.send_response(404); self.end_headers()
+    def log_message(self, *a): pass
+server = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(server.server_address[1], flush=True)
+server.serve_forever()
+PY2
+server=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -s "$work/port" ]] && break; sleep 0.3; done
+if MAVEN_USERNAME=u MAVEN_PASSWORD=p python3 -I "$tool" put "$out" "http://127.0.0.1:$(cat "$work/port")/maven" > "$work/log" 2>&1; then
+    pom_line="$(grep -n "PUT /maven/org/thisisthepy/compose/ui/ui/$V$S/ui-$V$S.pom " "$work/server.log" | cut -d: -f1)"
+    jar_line="$(grep -n "PUT /maven/org/thisisthepy/compose/ui/ui/$V$S/ui-$V$S.jar " "$work/server.log" | cut -d: -f1)"
+    meta_line="$(grep -n "PUT /maven/org/thisisthepy/compose/ui/ui/maven-metadata.xml " "$work/server.log" | cut -d: -f1)"
+    if [[ -n "$pom_line" && -n "$jar_line" && -n "$meta_line" && "$jar_line" -lt "$pom_line" && "$pom_line" -lt "$meta_line" ]] &&
+        ! grep -q "PUT .* Basic$" "$work/server.log"; then
+        pass "put uploads files, then the POM, then maven-metadata.xml, with credentials"
+    else
+        fail "put order or credentials"; cat "$work/server.log" >&2
+    fi
+else
+    fail "put failed"; cat "$work/log" >&2
+fi
+kill "$server" 2>/dev/null || true
+
 if [[ $failures -gt 0 ]]; then
     echo "$failures failure(s)" >&2
     exit 1

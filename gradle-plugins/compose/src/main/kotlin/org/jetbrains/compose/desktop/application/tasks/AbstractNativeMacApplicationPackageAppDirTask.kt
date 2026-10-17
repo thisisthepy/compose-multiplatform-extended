@@ -8,11 +8,13 @@ package org.jetbrains.compose.desktop.application.tasks
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.Optional
 import org.gradle.work.DisableCachingByDefault
-import org.jetbrains.compose.desktop.application.internal.InfoPlistBuilder
-import org.jetbrains.compose.desktop.application.internal.PlistKeys
+import org.jetbrains.compose.desktop.application.dsl.FileAssociation
+import org.jetbrains.compose.desktop.application.extended.NativeInfoPlist
+import org.jetbrains.compose.desktop.application.extended.NativeInfoPlistInput
 import org.jetbrains.compose.internal.utils.ioFile
 import org.jetbrains.compose.internal.utils.property
 import java.io.File
@@ -45,6 +47,15 @@ abstract class AbstractNativeMacApplicationPackageAppDirTask : AbstractNativeMac
     @get:Optional
     val minimumSystemVersion: Property<String> = objects.property()
 
+    /** Extra top-level keys for Info.plist, as raw XML. */
+    @get:Input
+    @get:Optional
+    val extraInfoPlistKeysRawXml: Property<String> = objects.property()
+
+    @get:Input
+    @get:Optional
+    internal val fileAssociations: SetProperty<FileAssociation> = objects.setProperty(FileAssociation::class.java)
+
     @get:InputFiles
     @get:Optional
     @get:PathSensitive(PathSensitivity.ABSOLUTE)
@@ -64,10 +75,7 @@ abstract class AbstractNativeMacApplicationPackageAppDirTask : AbstractNativeMac
         val appIconFile = appResourcesDir.resolve("$packageName.icns")
         iconFile.ioFile.copyTo(appIconFile)
 
-        InfoPlistBuilder().apply {
-            setupInfoPlist(executableName = appExecutableFile.name)
-            writeToFile(contentsDir.resolve("Info.plist"))
-        }
+        NativeInfoPlist.write(infoPlistInput(appExecutableFile.name), contentsDir.resolve("Info.plist"))
 
         if (!composeResourcesDirs.isEmpty) {
             fileOperations.copy { copySpec ->
@@ -77,19 +85,18 @@ abstract class AbstractNativeMacApplicationPackageAppDirTask : AbstractNativeMac
         }
     }
 
-    private fun InfoPlistBuilder.setupInfoPlist(executableName: String) {
-        this[PlistKeys.LSMinimumSystemVersion] = minimumSystemVersion.getOrElse(KOTLIN_NATIVE_MIN_SUPPORTED_MAC_OS)
-        this[PlistKeys.CFBundleDevelopmentRegion] = "English"
-        this[PlistKeys.CFBundleAllowMixedLocalizations] = "true"
-        this[PlistKeys.CFBundleExecutable] = executableName
-        this[PlistKeys.CFBundleIconFile] = iconFile.ioFile.name
-        this[PlistKeys.CFBundleIdentifier] = bundleID.get()
+    private fun infoPlistInput(executableName: String): NativeInfoPlistInput {
         val packageVersion = packageVersion.get()
-        this[PlistKeys.CFBundleShortVersionString] = packageVersion
-        this[PlistKeys.CFBundleVersion] = packageVersion
-        this[PlistKeys.LSApplicationCategoryType] = appCategory.orNull
-        this[PlistKeys.NSHumanReadableCopyright] = copyright.orNull
-        this[PlistKeys.NSSupportsAutomaticGraphicsSwitching] = "true"
-        this[PlistKeys.NSHighResolutionCapable] = "true"
+        return NativeInfoPlistInput(
+            executableName = executableName,
+            iconFileName = iconFile.ioFile.name,
+            bundleID = bundleID.get(),
+            version = packageVersion,
+            minimumSystemVersion = minimumSystemVersion.getOrElse(KOTLIN_NATIVE_MIN_SUPPORTED_MAC_OS),
+            appCategory = appCategory.orNull,
+            copyright = copyright.orNull,
+            extraKeysRawXml = extraInfoPlistKeysRawXml.orNull,
+            fileAssociations = fileAssociations.getOrElse(emptySet()).toList(),
+        )
     }
 }

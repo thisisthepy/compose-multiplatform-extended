@@ -1,0 +1,98 @@
+name: compose-multiplatform-core-extended's Compose in the local Maven repository
+description: >-
+  Publishes the Compose modules an application draws with, from a commit of
+  thisisthepy/compose-multiplatform-core-extended, to ~/.m2/repository under
+  org.thisisthepy.compose (its extended/compose/publish-local.sh), or restores them from the
+  cache for that commit. The plugin's aliases name those coordinates, and nothing on a public
+  repository has them yet.
+
+inputs:
+  ref:
+    description: The commit of compose-multiplatform-core-extended to build.
+    required: true
+  targets:
+    description: Space separated targets for publish-local.sh (desktop, macosArm64, linuxX64, linuxArm64).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Cache key
+      id: key
+      shell: bash
+      run: |
+        targets="$(echo '${{ inputs.targets }}' | tr ' ' '\n' | sort | paste -sd- -)"
+        echo "key=core-compose-${{ runner.os }}-${{ runner.arch }}-$targets-${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the core fork's Compose
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.m2/repository/org/thisisthepy/compose
+        key: ${{ steps.key.outputs.key }}
+
+    # The whole tree when it has to be built, only the scripts when the cache had it.
+    - uses: actions/checkout@v4
+      if: steps.restore.outputs.cache-hit != 'true'
+      with:
+        repository: thisisthepy/compose-multiplatform-core-extended
+        ref: ${{ inputs.ref }}
+        path: core-compose-src
+    - uses: actions/checkout@v4
+      if: steps.restore.outputs.cache-hit == 'true'
+      with:
+        repository: thisisthepy/compose-multiplatform-core-extended
+        ref: ${{ inputs.ref }}
+        path: core-compose-src
+        sparse-checkout: extended/compose
+
+    - name: A JDK 21 for the Compose build
+      if: steps.restore.outputs.cache-hit != 'true'
+      id: jdk
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'corretto'
+
+    - uses: gradle/actions/setup-gradle@v4
+      if: steps.restore.outputs.cache-hit != 'true'
+      with:
+        cache-read-only: true
+
+    - name: Publish the core fork's Compose
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: core-compose-src
+      env:
+        JAVA_HOME: ${{ steps.jdk.outputs.path }}
+        ANDROIDX_JDK21: ${{ steps.jdk.outputs.path }}
+      run: |
+        set -euo pipefail
+        # The settings the core fork's Linux CI builds with. A macOS runner keeps the build's
+        # own, because it has half the memory.
+        if [[ "$RUNNER_OS" == Linux ]]; then
+        mkdir -p ~/.gradle
+        cat >> ~/.gradle/gradle.properties <<PROPERTIES
+        org.gradle.caching=false
+        org.gradle.workers.max=4
+        org.gradle.jvmargs=-Xmx11g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dlint.nullness.ignore-deprecated=true -Dfile.encoding=UTF-8
+        kotlin.compiler.execution.strategy=in-process
+        PROPERTIES
+        fi
+        ./extended/compose/publish-local.sh ${{ inputs.targets }}
+
+    - name: Check what is in the local repository
+      shell: bash
+      run: python3 -I core-compose-src/extended/compose/check-local.py
+
+    - name: Save the core fork's Compose
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.m2/repository/org/thisisthepy/compose
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Remove the core checkout
+      if: always()
+      shell: bash
+      run: rm -rf core-compose-src

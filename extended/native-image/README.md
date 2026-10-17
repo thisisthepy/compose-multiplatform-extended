@@ -127,6 +127,22 @@ What it took, all in `windowsLink` and the static skiko archive:
 - Skia's ICU data is compiled into the skiko archive, since Skia otherwise looks for
   `icudtl.dat` beside the executable.
 
+## The one-executable gate
+
+`check-one-executable.sh` is what the "One executable (GraalVM, <os>)" jobs in
+`extended-native-image.yml` run on `hello-awtfree`. It fails unless the output directory holds
+one file, that file names only the system's libraries (`otool -L`, `readelf -d` and `ldd`,
+`dumpbin -dependents`), and, copied alone into an empty directory on a runner with every
+`icudtl.dat` removed, it lays Korean out correctly (every glyph found, the word around a
+syllable whole, lines broken between words), draws it into a PNG and opens its window.
+An executable that needs an ICU data file shows it there: a double click would select one
+syllable, and lines would wrap inside words.
+
+Measured by the gate, run 39028163166 (2026-10-17, NIK 25.0.4.1): `hello-awtfree` is one
+executable of 37.62 MB on macOS arm64, 46.27 MB on Linux x64 and 44.96 MB on Linux arm64, naming
+only system libraries, and on runners with no `icudtl.dat` each prints
+`text self-check: ok (no unresolved glyphs, word "반갑습니다", ...)` and inks the sample text.
+
 ## Running the Windows probe locally
 
 `extended/native-image/windows-probe.sh` is what CI runs, after the two local publications
@@ -137,10 +153,16 @@ ahead of `C:\Windows\System32` on PATH before running it: `vcvars64.bat` prepend
 where `bash` is WSL's launcher rather than an interpreter, and a nested script invoked as
 `bash` would run under WSL and fail.
 
+Visual Studio's own clang-cl works too, from the "C++ Clang Compiler for Windows" component,
+under `VC\Tools\Llvm\x64\bin`; a C++ workload does not install it by default. Keep MSVC's
+`cl`, `link`, `lib` and `dumpbin` ahead of clang-cl on PATH, the way CI pairs an MSVC
+environment with a separate LLVM.
+
 ## Not yet
 
 - Windows on a real display: the probe renders off screen, and opening a window by hand is
   still to be done.
-- Linux arm64, and Linux on a real display with GL rather than Xvfb.
+- Linux on a real display with GL rather than Xvfb.
+- The AWT-free gate on Windows x64, which needs the Win32 window layer in the core fork.
 - skiko's static archive is built by a script beside the core fork rather than resolved from a
   repository.

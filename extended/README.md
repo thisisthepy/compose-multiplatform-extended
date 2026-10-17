@@ -1,0 +1,356 @@
+# compose-multiplatform-extended
+
+The Compose Gradle plugin, extended to ship a desktop application as a JVM app, one GraalVM native-image executable, or one Kotlin/Native executable, all from the same `compose.desktop` settings.
+
+Korean: [README_ko.md](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/README_ko.md)
+
+This is thisisthepy's fork of
+[JetBrains/compose-multiplatform](https://github.com/JetBrains/compose-multiplatform), the
+repository of the Compose Gradle plugin. Its work lives on the `extended` branch. The
+repository root stays as upstream has it. What the fork adds is either in the plugin under
+`gradle-plugins/` or under `extended/`. It pairs with
+[compose-multiplatform-core-extended](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md),
+the fork of the Compose libraries.
+
+## Features
+
+- One application, three outputs: `output = ApplicationOutput.Jvm`, `NativeImage` or
+  `KotlinNative`. Name, version, vendor, icons and resources are written once in
+  `nativeDistributions`.
+- `packageNativeImage`: the application as one GraalVM native-image executable, with no Java
+  runtime beside it (macOS arm64, Linux x64, Windows x64).
+- `runNativeImageAgent`: records the reachability metadata the image is built from.
+- AWT-free windows: with `windowing = ApplicationWindowing.AwtFree` the window comes from the
+  extended window modules, not from the JDK's AWT. The window, input, IME, menu and chrome code
+  lives in those modules, in core-extended's
+  [`extended/window`](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md#window-modules), not in this plugin. The window C layers (`appkit_window.m` on
+  macOS, `x11_window.c` on Linux) are compiled and linked into the image, and CI builds and starts
+  that image in the "Package (macos-arm64)" and "Package (linux-x64)" jobs of the "Extended native
+  image" workflow. Windows is not implemented yet: its shared Win32 window layer is open in
+  core-extended [#32](https://github.com/thisisthepy/compose-multiplatform-core-extended/pull/32)
+  and compose-rust [#174](https://github.com/DarkPyonix/compose-rust/pull/174).
+- Kotlin/Native desktop packaging tasks for macOS, Linux and Windows, with upstream's own
+  `TargetFormat` names. They are merged and unit tested, and not yet built on CI: the CI cells
+  that link and package a real app are in [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26).
+  See "What each kind of Kotlin/Native app produces" below for the status of each format.
+- A command line program is a `.kexe` (signed on macOS) or an `.exe`, with no packaging.
+- Run tasks for every output, and a Windows application that is DPI aware on a scaled display.
+- Upstream's `compose` DSL and public API are unchanged, so an existing Compose project keeps
+  working. New settings are additive.
+- Design systems and the Liquid Glass material come from core-extended's
+  [`extended/design-systems`](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/design-systems/README.md), which
+  depends on published Compose only and never on a renderer.
+
+## Why use it
+
+Upstream's `compose.desktop` ships an application with a Java runtime packed beside it. That is
+a larger download and a runtime to keep up to date. With this fork the same
+project can also produce a single native executable, and it does so without AWT, so there is
+nothing in the executable that the application does not use.
+
+## Install
+
+The fork is not on a public repository yet. Publish the core fork's Compose and then the plugin
+to your local Maven repository, and put `mavenLocal()` ahead of the Gradle Plugin Portal:
+
+```sh
+# in a checkout of compose-multiplatform-core-extended, branch extended
+extended/compose/publish-local.sh desktop      # or macosArm64, linuxX64, linuxArm64
+
+# in this repository
+cd gradle-plugins
+./gradlew --no-daemon :compose:publishToMavenLocal \
+    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
+```
+
+```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories { mavenLocal(); gradlePluginPortal(); mavenCentral(); google() }
+}
+dependencyResolutionManagement {
+    repositories { mavenLocal(); mavenCentral(); google() }
+}
+```
+
+```kotlin
+// build.gradle.kts
+plugins {
+    kotlin("jvm") version "2.2.20"
+    kotlin("plugin.compose") version "2.2.20"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
+}
+```
+
+The plugin has this fork's own ID, so it sits beside JetBrains' `org.jetbrains.compose` without
+either replacing the other. See [The Gradle plugin](#the-gradle-plugin).
+
+## The three ways to ship
+
+| Output | What you get | Task | Details |
+|---|---|---|---|
+| JVM | an application with a Java runtime beside it (dmg, deb, msi, ...) | `packageDistributionForCurrentOS` | upstream's, unchanged |
+| GraalVM native image | one executable, no runtime | `packageNativeImage` | [One executable](#one-executable-packagenativeimage) below |
+| Kotlin/Native | one executable per target, packaged with the same `TargetFormat`s (table below), or the bare `.kexe`/`.exe` for a command line program | `packageKotlinNative` |
+
+The two native outputs, GraalVM native-image and Kotlin/Native, each produce one executable per
+application, with no Java runtime beside it. `packageApplication` runs the one the `output`
+setting names:
+
+```kotlin
+compose.desktop.application {
+    mainClass = "hello.MainKt"
+    output = ApplicationOutput.NativeImage      // Jvm (default), NativeImage or KotlinNative
+    windowing = ApplicationWindowing.AwtFree    // Awt (default for Jvm) or AwtFree
+    nativeDistributions {
+        packageName = "Hello"
+        packageVersion = "1.0.0"
+    }
+}
+```
+
+### Plugin IDs
+
+This fork has two plugin IDs of its own. Owner, 2026-10-05: one for Compose applications and one
+for command line programs.
+
+- **Compose desktop**, `org.thisisthepy.compose` (`gradle-plugins/compose/build.gradle.kts`):
+  applications with a Compose window, in all three outputs above. A Kotlin/Native window app is
+  packaged. It handles the command line outputs too. See [The Gradle plugin](#the-gradle-plugin).
+- **Kotlin/Native desktop for command line programs**, `org.thisisthepy.kotlin.native.desktop`:
+  no Compose and no window. **Status: open**, in
+  [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31). The id follows the Kotlin build tooling's naming
+  (`org.jetbrains.kotlin.native.cocoapods` maps to `org.thisisthepy.kotlin.native.<feature>`).
+  Owner, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
+
+What each kind of Kotlin/Native app produces. Owner, 2026-10-05:
+
+> [user] "업스트림이 지원하는게 저렇게 다양하면 업스트림쪽에서 확장하는게 맞긴 하지. Mac: 앱은 .app 패키지는 .dmg 스토어 패키지는 .pkg / 리눅스: 앱 .appimage 패키지는 .deb/.rpm 스토어 패키지는 .flatpack / 윈도우: 앱 .exe 패키지는 .msi/.exe(설치) 스토어 패키지는 .msix / 이렇게 가자. 그럼 업스트림 기능 확장 정도이겠네."
+
+| OS | App | Package | Store package |
+|---|---|---|---|
+| macOS | `.app` | `.dmg` | `.pkg` |
+| Linux | `.AppImage` | `.deb`, `.rpm` | Flatpak |
+| Windows | `.exe` | `.msi`, `.exe` (installer) | `.msix` |
+
+The Compose plugin extends upstream's `nativeDistributions`: the same `TargetFormat`s that
+already work on the JVM output work for a Kotlin/Native window app, and the formats upstream
+lacks are added in the same style. Status of each, as of 2026-10-05:
+
+| Format | Status |
+|---|---|
+| `.app`, `.dmg` | merged (upstream's tasks, plus signing and notarization); not yet built on CI |
+| `.pkg` (App Store form) | merged; not yet built on CI |
+| `.deb`, `.rpm` | merged; not yet built on CI |
+| `.AppImage` | a first task is merged; the self-updating Velopack AppImage is not started |
+| `.exe` folder, `.msi` | first versions are merged; Velopack replaces them, and the Velopack change is not open yet |
+| Windows installer `.exe` (Velopack `Setup.exe`) | not open yet |
+| `.dmg` made from Velopack's portable zip | not open yet |
+| Flatpak, `.msix`, a real `.AppImage` file format | open, [#40](https://github.com/thisisthepy/compose-multiplatform-extended/pull/40) |
+| Kotlin/Native build and package cells on CI | open, [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26) |
+
+Velopack is meant to build the direct distribution formats on every OS: the Windows `Setup.exe`
+and `.msi`, the macOS `.dmg` (made from the `.app` in Velopack's portable zip, because Velopack
+makes no dmg itself), and the Linux `.AppImage`. That is the plan, not the state. Owner, 2026-10-05:
+
+> [user] "윈도우는 Velopack으로 하자. NSIS랑 wix는 너무 별로야."
+
+The plugin is to produce the packages and the update feed artifacts (full and delta packages and
+`releases.<channel>.json`). Updating an installed application is not the plugin's job:
+application developers use the Velopack SDK directly. Owner, 2026-10-05:
+
+> [user] "업데이트 sdk 때문에 그런거면 그건 우리가 커버쳐줄 부분은 아닌거같아."
+
+Signing. `.dmg`, `.msi` and the installer `.exe` install unsigned and are the default way to
+distribute. `.pkg` and `.msix` are store formats: they are for store submission (the store
+re-signs) or for when a certificate exists.
+
+For command line programs:
+
+> [user] "Cli 플러그인에는 확장자 .kexe랑 .exe가 맞지. .kexe에 서명하면 되고. .app이랑 .appimage는 gui 앱일때 하는게 맞는거같고 .msi 패키지는 너무 갔어"
+
+A command line program is not packaged: the executable is the output. On macOS the `.kexe` is
+signed, ad hoc by default (the linker's signature is kept, and made again after any edit
+after the link) or with a Developer ID when a certificate is configured. Notarization cannot
+be stapled to a bare file, so it is an optional task that submits a zip. The JVM output keeps
+upstream's `nativeDistributions` formats.
+
+### Windows needs the MSVC Build Tools
+
+The final link of a Windows executable is MSVC's, on both native paths. A GraalVM native image
+on Windows is linked by MSVC today. Every `mingwX64` target ships as a final MSVC executable too:
+Kotlin/Native compiles MinGW objects, which are rewritten so the MSVC linker accepts them, and the
+MSVC linker links them with Skia and the window C layer, which are MSVC builds. There is no
+MinGW-only path. The owner decided this on 2026-10-05:
+
+> [user] "Msvc 있어야 하는게 뭐 어때서? 나는 물어보는거잖아. Mingw 우회 구현을 넣지 마. Extended는 Mingw 타겟도 전부 최종 msvc 앱으로 나가도록 하면 되는거지 그냥."
+
+Install Visual Studio Build Tools with the MSVC toolset v14.51 or later, `clang-cl` and the
+Windows SDK. The GraalVM native image on Windows has the same toolset requirement (below).
+
+**Status: open** for Kotlin/Native. The MSVC link step for `mingwX64` is in
+[#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31), and the check that finds the
+tools at the start of the build and stops with an install message when one is missing is in
+[#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26). Neither is on `extended` yet.
+
+### macOS signing and notarization
+
+The Kotlin/Native `.app` is signed by `signDistributableNative...` (a `.kexe` by `signExecutableNative...`): with a Developer ID
+identity when `nativeDistributions.macOS.signing { identity = "..." }` is set, ad hoc
+otherwise (enough to run on the machine that built it). `notarizeDmgNative...` submits the
+dmg with `macOS.notarization { appleID, password, teamID }` and staples the ticket. Without
+credentials it prints "Skipping notarization" and succeeds, so CI without Apple credentials
+still passes. See
+[`gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md)
+for every task and the Linux and Windows prerequisites.
+
+## What it adds, in detail
+
+| Addition | Status | Where |
+|---|---|---|
+| `packageNativeImage`: a Compose desktop application as one GraalVM native-image executable on macOS arm64, Linux x64 and Windows x64 | implemented | [`extended/native-image`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/native-image/README.md) |
+| `runNativeImageAgent`: the reachability metadata the image is built from | implemented | same |
+| Kotlin/Native packaging and run tasks (macOS, Linux, Windows) | implemented | [`extended/gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
+| Windows: a DPI-aware executable, and a check for an old MSVC toolset before the link | implemented | [#8](https://github.com/thisisthepy/compose-multiplatform-extended/pull/8) |
+| Windows on a real display (the probe renders off screen) | planned | [`extended/native-image`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/native-image/README.md#not-yet) |
+| Plugin ID `org.thisisthepy.compose`, aliases resolving to the core fork's `org.thisisthepy.compose.*` libraries | implemented | [The Gradle plugin](#the-gradle-plugin) |
+
+The Compose libraries this pairs with, and the static skiko archive the image links, come from
+[thisisthepy/compose-multiplatform-core-extended](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md).
+
+## One executable: packageNativeImage
+
+What `compose.desktop` makes today is an application with a Java runtime packed beside it.
+`packageNativeImage` makes a GraalVM native image instead: one file, no runtime, nothing
+unpacked at start. AWT, JAWT and Skia are linked in from static archives, because a single
+executable cannot open them as separate files. The per-directory README explains each piece,
+per platform, with what was measured:
+[extended/native-image/README.md](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/native-image/README.md).
+
+### Requirements
+
+- **GraalVM: Liberica NIK 25 Full.** The image links the JDK's AWT statically, and only a
+  distribution that ships the JDK's static archives can do that. The task stops with that
+  reason when they are missing. Measured with NIK 25.0.4.1.
+- **The static skiko archive**, from `extended/skiko/build-skiko-static-jvm.sh` in
+  compose-multiplatform-core-extended, built on the same system. A single executable cannot
+  load Skia from a file.
+- **The host is the target.** native-image builds for the system it runs on, so Linux is
+  built on Linux and Windows on Windows.
+- **Linux x64:** the X11, GL, fontconfig, freetype and dbus development packages that the
+  [Linux probe workflow](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/.github/workflows/native-image-linux-probe.yml)
+  installs.
+- **Windows x64:**
+  - Run from an x64 Native Tools Command Prompt (or after `vcvars64.bat`), because the task
+    finds the MSVC libraries on `LIB` and calls `cl` and `dumpbin`.
+  - MSVC toolset 14.51 or later. Skia's archives call runtime helpers that 14.43 lacks
+    (`__std_find_first_of_trivial_pos_1`), so an older toolset fails at the link. Today that
+    failure names only the missing symbol; #8 makes the task say so before the link.
+  - `clang-cl` on PATH for the skiko archive, because skiko compiles its Windows bindings with
+    it: `winget install LLVM.LLVM`, or Visual Studio's "C++ Clang Compiler for Windows".
+
+### Configure
+
+```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories {
+        mavenLocal()
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        google()
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
+plugins {
+    kotlin("jvm") version "2.2.20"
+    kotlin("plugin.compose") version "2.2.20"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
+}
+
+dependencies {
+    implementation(compose.desktop.currentOs)
+}
+
+compose.desktop.application {
+    mainClass = "hello.MainKt"
+    nativeImage {
+        graalvmHome = "/path/to/liberica-nik-25-full"      // or GRAALVM_HOME
+        skikoStaticDirectory = file("/path/to/work/out/macos-arm64")
+    }
+}
+```
+
+The `nativeImage { }` block takes:
+
+| Property | Meaning | Default |
+|---|---|---|
+| `graalvmHome` | The GraalVM that builds the image | `GRAALVM_HOME` |
+| `skikoStaticDirectory` | `build-skiko-static-jvm.sh` output: `libskiko-static.a` (`skiko-static.lib` on Windows) and `skia/` | required |
+| `imageName` | The executable's name | the application's package name |
+| `metadataDirectory` | Where `runNativeImageAgent` writes and `packageNativeImage` reads the metadata | `src/main/native-image` |
+| `buildArgs` | Extra arguments for native-image, after the plugin's own | none |
+
+[`extended/native-image/hello`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/extended/extended/native-image/hello)
+is a complete project set up this way.
+
+### Run
+
+```sh
+./gradlew runNativeImageAgent    # the application on GraalVM's JVM, writing src/main/native-image
+./gradlew packageNativeImage     # build/compose/native-image/main/<name>
+```
+
+`runNativeImageAgent` runs the application on GraalVM's own `java` with the tracing agent,
+merging what it sees into `metadataDirectory`. The agent writes on a clean exit, so close the
+application rather than kill it. Run it again after a change that reaches new classes or
+resources. Keep the directory with the sources, because `packageNativeImage` builds from it.
+
+`packageNativeImage` writes one executable and nothing beside it. It is registered once per
+application rather than once per build type: GraalVM optimises the image whatever the build
+type, and ProGuard's output is not what an image should be analysed from.
+
+## The Gradle plugin
+
+The plugin is published under this fork's own name, so that it can sit beside JetBrains'
+`org.jetbrains.compose` without either replacing the other. The implementation class and the
+`compose { }` DSL stay JetBrains', so an existing build only changes its `plugins { }` line.
+
+- plugin ID: `org.thisisthepy.compose` (marker
+  `org.thisisthepy.compose:org.thisisthepy.compose.gradle.plugin`)
+- artifact: `org.thisisthepy.compose:compose-gradle-plugin`
+- version: `<upstream version>-ext.<N>`, `1.11.1-ext.1` by default (`gradle-plugins/gradle.properties`);
+  `-ext.<N>-dev` for a local build. The probes and samples use `1.11.1-ext.1-dev`.
+- the aliases (`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` and the rest)
+  resolve to compose-multiplatform-core-extended's `org.thisisthepy.compose.*` libraries at
+  `-Pcompose.version` (`1.11.1-ext.1`) and `-Pcompose.material3.version`
+  (`1.11.0-alpha07-ext.1`). `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
+  coordinate too.
+- the components and Compose HTML stay JetBrains', at the upstream version (`1.11.1`), because
+  the core fork does not build them.
+
+```sh
+cd gradle-plugins
+./gradlew --no-daemon :compose:publishToMavenLocal \
+    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
+```
+
+```kotlin
+plugins {
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
+}
+```
+
+The libraries the aliases name are not on a public repository yet; publish them from the core
+fork first (`extended/compose/publish-local.sh`, see the core fork's
+[Maven coordinates](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md#maven-coordinates)).

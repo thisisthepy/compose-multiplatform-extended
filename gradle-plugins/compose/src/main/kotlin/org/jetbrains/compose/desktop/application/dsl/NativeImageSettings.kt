@@ -6,6 +6,7 @@
 package org.jetbrains.compose.desktop.application.dsl
 
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
@@ -18,6 +19,12 @@ import javax.inject.Inject
  * it needs by running the application on GraalVM's JVM. macOS arm64 only so far.
  */
 abstract class NativeImageSettings @Inject constructor(objects: ObjectFactory) {
+    /**
+     * A checkout of compose-multiplatform-core-extended. Its `extended/window` C and
+     * Objective-C sources are compiled into an [ApplicationWindowing.AwtFree] image.
+     */
+    val windowSourcesDirectory: DirectoryProperty = objects.directoryProperty()
+
     /**
      * The GraalVM that builds the image. On macOS it has to be a distribution that ships the
      * JDK's AWT as static archives, which Liberica NIK Full does. Defaults to GRAALVM_HOME.
@@ -39,6 +46,14 @@ abstract class NativeImageSettings @Inject constructor(objects: ObjectFactory) {
      * directory beside it. Required: a single executable cannot load Skia from a file.
      */
     val skikoStaticDirectory: DirectoryProperty = objects.directoryProperty()
+
+    /**
+     * Windows only: the application manifest embedded in the executable, replacing the one
+     * this plugin embeds. A process without a manifest is DPI unaware, and Windows stretches
+     * its drawing to a scaled display; the built-in one declares what the JDK's java.exe does.
+     * Only one manifest can be embedded, so setting this leaves the built-in one out.
+     */
+    val windowsManifest: RegularFileProperty = objects.fileProperty()
 
     /** Arguments passed to native-image after the ones this plugin needs. */
     val buildArgs: ListProperty<String> = objects.listProperty(String::class.java)

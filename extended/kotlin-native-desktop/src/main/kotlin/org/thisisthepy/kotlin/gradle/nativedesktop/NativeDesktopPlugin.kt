@@ -308,9 +308,6 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
             } catch (e: MsvcLinkException) {
                 throw GradleException(e.message ?: "the MSVC link failed", e)
             }
-            for (file in unpacked.flatMap { it.runtimeFiles }) {
-                file.copyTo(File(output.parentFile, file.name), overwrite = true)
-            }
         }
     }
 }

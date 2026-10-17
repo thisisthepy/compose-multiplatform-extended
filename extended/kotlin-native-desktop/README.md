@@ -53,8 +53,9 @@ and other plugin code can call it directly:
    `libraries` get the same blanking.
 6. A library whose C++ half has to be MSVC's cannot carry it in its klib, because the klib's
    native code goes to Kotlin/Native's MinGW link. It publishes it beside the klib as a zip
-   with the classifier `msvc` (`lib/` to link, `runtime/` to copy next to the executable,
-   `msvc-link.properties` naming Windows import libraries and whether it needs `libcpmt.lib`).
+   with the classifier `msvc` (`obj/` linked whole, `lib/` to link, `msvc-link.properties`
+   naming Windows import libraries and whether it needs `libcpmt.lib`). Nothing goes beside
+   the executable: data a library would read from a file is compiled into an object instead.
    For every module named in `linkBundles` that the program depends on, the link adds that
    zip at the same version. The default names `org.thisisthepy.compose.skiko:skiko-mingwx64`,
    skiko for mingwX64 with Skia, so a Compose program for Windows links with nothing extra.

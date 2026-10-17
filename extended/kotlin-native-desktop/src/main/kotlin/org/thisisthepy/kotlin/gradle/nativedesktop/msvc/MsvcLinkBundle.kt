@@ -16,16 +16,20 @@ import java.util.zip.ZipFile
  * Kotlin/Native's own linker takes it from there. On Windows that linker is MinGW's, and C++ that
  * has to be MSVC's (to call into a library built with MSVC, such as JetBrains' Skia) cannot go
  * that way. Such a library publishes it beside the klib instead, as a zip with the classifier
- * `msvc`, and the MSVC link adds it:
+ * `msvc`, and the MSVC link adds it. Runtime directives in all of it are blanked. Nothing in it is
+ * copied next to the executable: the program is one file.
  *
- * - `lib/`: the static libraries (`.lib`) to link, their runtime directives blanked;
- * - `runtime/`: files the program reads at run time, copied next to the executable;
+ *
+ * - `obj/`: objects (`.obj`) linked whole, so a definition in one always wins over a library
+ *   member that defines the same name (data compiled in, for example, in place of a loader
+ *   that would read it from a file);
+ * - `lib/`: the static libraries (`.lib`) to link;
  * - `msvc-link.properties`: `systemLibraries=a.lib,b.lib`, the Windows import libraries it calls
  *   into, and `cppStandardLibrary=true` when it is C++ and needs MSVC's `libcpmt.lib`.
  */
 data class MsvcLinkBundle(
+    /** The objects first, then the libraries, in the order the link names them. */
     val libraries: List<File>,
-    val runtimeFiles: List<File>,
     val systemLibraries: List<String>,
     val cppStandardLibrary: Boolean,
 ) {
@@ -55,11 +59,17 @@ data class MsvcLinkBundle(
             File(directory, "msvc-link.properties").takeIf { it.isFile }?.reader()?.use { properties.load(it) }
             fun files(dir: String, filter: (File) -> Boolean) =
                 File(directory, dir).listFiles().orEmpty().filter { it.isFile && filter(it) }.sortedBy { it.name }
-            val libraries = files("lib") { it.extension.equals("lib", ignoreCase = true) }
-            if (libraries.isEmpty()) throw MsvcLinkException("${zip.name} holds no lib/*.lib to link")
+            val libraries = files("obj") { it.extension.equals("obj", ignoreCase = true) } +
+                files("lib") { it.extension.equals("lib", ignoreCase = true) }
+            if (libraries.isEmpty()) throw MsvcLinkException("${zip.name} holds nothing to link in obj/ or lib/")
+            File(directory, "runtime").takeIf { it.exists() }?.let {
+                throw MsvcLinkException(
+                    "${zip.name} has files for beside the executable (runtime/), and the program is one file. " +
+                        "Compile them into an object in obj/ instead."
+                )
+            }
             return MsvcLinkBundle(
                 libraries = libraries,
-                runtimeFiles = files("runtime") { true },
                 systemLibraries = properties.getProperty("systemLibraries").orEmpty()
                     .split(',').map { it.trim() }.filter { it.isNotEmpty() },
                 cppStandardLibrary = properties.getProperty("cppStandardLibrary")?.trim().toBoolean(),

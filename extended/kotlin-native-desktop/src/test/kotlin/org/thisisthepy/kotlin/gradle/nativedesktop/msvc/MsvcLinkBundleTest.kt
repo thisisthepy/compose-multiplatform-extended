@@ -28,18 +28,17 @@ class MsvcLinkBundleTest {
     }
 
     @Test
-    fun `a bundle gives its libraries, runtime files, import libraries and the C++ library`(@TempDir dir: File) {
+    fun `a bundle gives its objects first, then its libraries, import libraries and the C++ library`(@TempDir dir: File) {
         val archive = zip(
             File(dir, "skiko-mingwx64-1.11.1-ext.1-msvc.zip"),
             "lib/skiko-bridges.lib" to "a",
             "lib/skia.lib" to "b",
-            "runtime/icudtl.dat" to "c",
+            "obj/embedded_icu.obj" to "c",
             "msvc-link.properties" to "systemLibraries=opengl32.lib, d3d12.lib\ncppStandardLibrary=true\n",
         )
         val bundle = MsvcLinkBundle.unpack(archive, File(dir, "out"))
-        assertEquals(listOf("skia.lib", "skiko-bridges.lib"), bundle.libraries.map { it.name })
+        assertEquals(listOf("embedded_icu.obj", "skia.lib", "skiko-bridges.lib"), bundle.libraries.map { it.name })
         assertTrue(bundle.libraries.all { it.isFile })
-        assertEquals(listOf("icudtl.dat"), bundle.runtimeFiles.map { it.name })
         assertEquals(listOf("opengl32.lib", "d3d12.lib"), bundle.systemLibraries)
         assertTrue(bundle.cppStandardLibrary)
     }
@@ -49,13 +48,19 @@ class MsvcLinkBundleTest {
         val bundle = MsvcLinkBundle.unpack(zip(File(dir, "a.zip"), "lib/a.lib" to "a"), File(dir, "out"))
         assertEquals(emptyList<String>(), bundle.systemLibraries)
         assertFalse(bundle.cppStandardLibrary)
-        assertEquals(emptyList<File>(), bundle.runtimeFiles)
+    }
+
+    @Test
+    fun `a bundle with files for beside the executable is refused`(@TempDir dir: File) {
+        assertThrows(MsvcLinkException::class.java) {
+            MsvcLinkBundle.unpack(zip(File(dir, "a.zip"), "lib/a.lib" to "a", "runtime/icudtl.dat" to "x"), File(dir, "out"))
+        }
     }
 
     @Test
     fun `a bundle with nothing to link is refused`(@TempDir dir: File) {
         assertThrows(MsvcLinkException::class.java) {
-            MsvcLinkBundle.unpack(zip(File(dir, "a.zip"), "runtime/x.dat" to "x"), File(dir, "out"))
+            MsvcLinkBundle.unpack(zip(File(dir, "a.zip"), "msvc-link.properties" to "x=y"), File(dir, "out"))
         }
     }
 

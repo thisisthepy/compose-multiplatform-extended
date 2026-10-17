@@ -251,9 +251,8 @@ compose.desktop.application {
   compose-multiplatform-core-extended 의 `org.thisisthepy.compose.*` 라이브러리를 `-Pcompose.version`
   (`1.11.1-ext.1`)과 `-Pcompose.material3.version`(`1.11.0-alpha07-ext.1`)으로 가리킵니다.
   `compose("org.jetbrains.compose.ui:ui")` 도 포크의 좌표로 바뀝니다.
-- runtime(`compose.runtime`, `compose.runtimeSaveable`), components, Compose HTML 은 JetBrains 것을
-  업스트림 버전(`1.11.1`)으로 씁니다. core 포크가 바꾸지도 배포하지도 않고, JetBrains 의 라이브러리가
-  runtime 을 JetBrains 좌표로 찾기 때문입니다.
+- components 와 Compose HTML 은 JetBrains 것을 업스트림 버전(`1.11.1`)으로 씁니다. core 포크가
+  빌드하지 않기 때문입니다.
 
 ```sh
 cd gradle-plugins

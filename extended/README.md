@@ -336,9 +336,8 @@ The plugin is published under this fork's own name, so that it can sit beside Je
   `-Pcompose.version` (`1.11.1-ext.1`) and `-Pcompose.material3.version`
   (`1.11.0-alpha07-ext.1`). `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
   coordinate too.
-- the runtime (`compose.runtime`, `compose.runtimeSaveable`), the components and Compose HTML
-  stay JetBrains', at the upstream version (`1.11.1`). The core fork does not change or publish
-  them, and JetBrains' libraries ask for the runtime by JetBrains' coordinates.
+- the components and Compose HTML stay JetBrains', at the upstream version (`1.11.1`), because
+  the core fork does not build them.
 
 ```sh
 cd gradle-plugins

@@ -123,6 +123,11 @@ syllable whole, lines broken between words), draws it into a PNG and opens its w
 An executable that needs an ICU data file shows it there: a double click would select one
 syllable, and lines would wrap inside words.
 
+Measured by the gate, run 39028163166 (2026-10-17, NIK 25.0.4.1): `hello-awtfree` is one
+executable of 37.62 MB on macOS arm64, 46.27 MB on Linux x64 and 44.96 MB on Linux arm64, naming
+only system libraries, and on runners with no `icudtl.dat` each prints
+`text self-check: ok (no unresolved glyphs, word "반갑습니다", ...)` and inks the sample text.
+
 ## Running the Windows probe locally
 
 `extended/native-image/windows-probe.sh` is what CI runs, and it works from Git Bash
@@ -141,6 +146,7 @@ environment with a separate LLVM.
 
 - Windows on a real display: the probe renders off screen, and opening a window by hand is
   still to be done.
-- Linux arm64, and Linux on a real display with GL rather than Xvfb.
+- Linux on a real display with GL rather than Xvfb.
+- The AWT-free gate on Windows x64, which needs the Win32 window layer in the core fork.
 - skiko's static archive is built by a script beside the core fork rather than resolved from a
   repository.

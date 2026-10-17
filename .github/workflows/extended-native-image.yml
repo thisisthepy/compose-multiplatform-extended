@@ -1,5 +1,7 @@
 # The native-image gate for the extended branch: an AWT-free Compose application packaged as
-# one executable on macOS arm64 and Linux x64, then started. There is no paths filter, because
+# one executable on macOS arm64, Linux x64 and Linux arm64, then checked to be one: one file,
+# only the system's libraries, Korean laid out with no ICU data file on the machine, and
+# started alone from an empty directory. There is no paths filter, because
 # this may become a required check and a required check that is skipped blocks the merge.
 #
 # The window modules, skiko's static archive and the plugin are all built here from pinned
@@ -21,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: 87f67ef9a3c5eff81da9f0999a71addfa6ac7295
+  CORE_EXTENDED_REF: 8d01b12aec96c10e772b67660f509cb330b17e28
   PLUGIN_VERSION: 1.11.1-extended-dev
   COMPOSE_VERSION: 1.11.1
   NIK_BASE: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2
@@ -47,13 +49,8 @@ jobs:
           sparse-checkout: extended/window
       - name: No runtime reflection, upcalls through the table
         run: |
-          meta=extended/native-image/hello-awtfree/src/main/native-image/reachability-metadata.json
-          if [ -f "$meta" ]; then
-            bash extended/native-image/check-native-config.sh core-extended --strict "$meta"
-          else
-            echo "hello-awtfree does not exist yet: checking the window sources only"
-            bash extended/native-image/check-native-config.sh core-extended
-          fi
+          bash extended/native-image/check-native-config.sh core-extended --strict \
+            extended/native-image/hello-awtfree/src/main/native-image/reachability-metadata.json
 
   plugin-dsl:
     name: Plugin DSL additive
@@ -112,7 +109,7 @@ jobs:
           test -s "$png"
 
   package:
-    name: Package (${{ matrix.name }})
+    name: One executable (GraalVM, ${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +120,9 @@ jobs:
           - name: linux-x64
             os: ubuntu-24.04
             nik: linux-amd64
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            nik: linux-aarch64
           # Kotlin/Native packaging cells go here. Each one runs check-native-config.sh (already
           # scans extended/window/native) and, after linking, `nm` on the executable for
           # Objective-C or class-name lookups; see the K/N section of the plugin change list.
@@ -168,12 +168,6 @@ jobs:
           echo "GRAALVM_HOME=$home" >> "$GITHUB_ENV"
           "$home/bin/native-image" --version
 
-      - name: Does the AwtFree sample exist
-        id: sample
-        shell: bash
-        run: |
-          if [ -f "$SAMPLE_AWTFREE/build.gradle.kts" ]; then echo "awtfree=true" >> "$GITHUB_OUTPUT"; else echo "awtfree=false" >> "$GITHUB_OUTPUT"; fi
-
       # skiko without JAWT, for the AWT-free sample. Keyed on the pinned commit, which pins the
       # script and skiko's revision with it.
       - name: skiko static archive cache (no JAWT)
@@ -213,12 +207,12 @@ jobs:
         working-directory: gradle-plugins
         run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
 
-      # The AwtFree sample: packageNativeImage with the no-JAWT archive, then a headless start.
+      # The AwtFree sample: packageNativeImage with the no-JAWT archive and the window layer.
       - name: packageNativeImage (AwtFree sample)
-        if: steps.sample.outputs.awtfree == 'true'
         working-directory: ${{ env.SAMPLE_AWTFREE }}
         env:
           SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
+          CORE_EXTENDED: ${{ github.workspace }}/core-extended
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
@@ -251,37 +245,34 @@ jobs:
       - name: "compose-rust/pythonx: config check on the generated metadata"
         shell: bash
         run: |
-          if [ "${{ steps.sample.outputs.awtfree }}" = true ]; then
-            bash extended/native-image/check-native-config.sh core-extended --strict "$SAMPLE_AWTFREE/src/main/native-image/reachability-metadata.json"
+          bash extended/native-image/check-native-config.sh core-extended --strict "$SAMPLE_AWTFREE/src/main/native-image/reachability-metadata.json"
+          bash extended/native-image/check-native-config.sh core-extended extended/native-image/hello-awtfree-link/src/main/native-image/reachability-metadata.json
+
+      # The executable has to find Korean words and line breaks with what is linked into it.
+      # A hosted runner ships browsers that carry icudtl.dat, so they are removed, and the
+      # check below confirms none is left.
+      - name: Take every ICU data file off the runner
+        shell: bash
+        run: |
+          { find /usr /opt /Library /Applications /home /Users /snap -name 'icudtl.dat' 2>/dev/null || true; } |
+            while IFS= read -r file; do echo "removing $file"; sudo rm -f "$file"; done
+      - name: One file, system libraries only, Korean with no ICU data, run alone
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(find "$SAMPLE_AWTFREE/build/compose/native-image" -mindepth 1 -maxdepth 1 -type d | head -1)"
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s '-screen 0 1280x1024x24' bash extended/native-image/check-one-executable.sh "$out" "$RUNNER_TEMP/one-executable"
           else
-            bash extended/native-image/check-native-config.sh core-extended extended/native-image/hello-awtfree-link/src/main/native-image/reachability-metadata.json
+            bash extended/native-image/check-one-executable.sh "$out" "$RUNNER_TEMP/one-executable"
           fi
-
-      - name: Smoke start, Linux (Xvfb)
-        if: runner.os == 'Linux' && steps.sample.outputs.awtfree == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          dir="$SAMPLE_AWTFREE"
-          exe=$(find "$dir/build/compose/native-image" -maxdepth 2 -type f -perm -u+x | head -1)
-          single="$RUNNER_TEMP/single"; rm -rf "$single"; mkdir -p "$single"; cp "$exe" "$single/app"
-          cd "$single"
-          HELLO_SELF_CHECK="$single/self-check.png" xvfb-run -a timeout 120 ./app
-          test -s "$single/self-check.png"
-
-      # No display session on the macOS runner to draw into, so this starts the executable and
-      # lets it quit on its own through the auto-exit variable, as compose-rust's smoke tests do.
-      - name: Smoke start, macOS (start and exit)
-        if: runner.os == 'macOS' && steps.sample.outputs.awtfree == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          dir="$SAMPLE_AWTFREE"
-          exe=$(find "$dir/build/compose/native-image" -maxdepth 2 -type f -perm -u+x | head -1)
-          single="$RUNNER_TEMP/single"; rm -rf "$single"; mkdir -p "$single"; cp "$exe" "$single/app"
-          cd "$single"
-          HELLO_SELF_CHECK="$single/self-check.png" perl -e 'alarm 120; exec @ARGV' ./app
-
+      - name: Keep the self-check drawing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-executable-${{ matrix.name }}
+          path: ${{ runner.temp }}/one-executable/*.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:

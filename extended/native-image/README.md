@@ -112,6 +112,17 @@ What it took, all in `windowsLink` and the static skiko archive:
 - Skia's ICU data is compiled into the skiko archive, since Skia otherwise looks for
   `icudtl.dat` beside the executable.
 
+## The one-executable gate
+
+`check-one-executable.sh` is what the "One executable (GraalVM, <os>)" jobs in
+`extended-native-image.yml` run on `hello-awtfree`. It fails unless the output directory holds
+one file, that file names only the system's libraries (`otool -L`, `readelf -d` and `ldd`,
+`dumpbin -dependents`), and, copied alone into an empty directory on a runner with every
+`icudtl.dat` removed, it lays Korean out correctly (every glyph found, the word around a
+syllable whole, lines broken between words), draws it into a PNG and opens its window.
+An executable that needs an ICU data file shows it there: a double click would select one
+syllable, and lines would wrap inside words.
+
 ## Running the Windows probe locally
 
 `extended/native-image/windows-probe.sh` is what CI runs, and it works from Git Bash

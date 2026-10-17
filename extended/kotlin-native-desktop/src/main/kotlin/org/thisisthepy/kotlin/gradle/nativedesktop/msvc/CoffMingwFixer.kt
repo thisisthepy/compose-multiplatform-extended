@@ -23,7 +23,12 @@ import java.nio.ByteOrder
  *    `.xdata$NAME` as COMDATs of their own and its linker pairs them with the code by name.
  *    MSVC's linker follows the COFF rules instead, sees two sections nothing refers to and drops
  *    them, and an exception passing through the function is then unwound as if it were a leaf.
- *    Marking them associative to `.text$NAME` says that they live and die with that code.
+ *    Marking them associative to the code says that they live and die with it. The code is the
+ *    section the `.pdata` entry's first relocation (the function's start) points into, and an
+ *    `.xdata` goes with the code of the `.pdata` that points at it; the name is the fallback
+ *    only. In a whole program built as one object, names repeat and the name alone pairs some
+ *    unwind data with the wrong code, which MSVC's linker refuses ("invalid .pdata
+ *    contributions").
  *
  * Both the ordinary COFF layout and the "big object" layout (32-bit section numbers, which
  * Kotlin/Native writes once an object has more sections than 16 bits can number) are handled.
@@ -36,6 +41,8 @@ object CoffMingwFixer {
     private const val MACHINE_AMD64 = 0x8664
 
     private class Layout(
+        /** Where the object starts: file offsets inside it (relocations, symbols) count from here. */
+        val base: Int,
         val sectionTable: Int,
         val sectionCount: Int,
         val symbolTable: Int,
@@ -73,7 +80,7 @@ object CoffMingwFixer {
             val symPtr = buf.getInt(base + 8)
             val symCount = buf.getInt(base + 12)
             val optional = buf.getShort(base + 16).toInt() and 0xFFFF
-            return Layout(base + 20 + optional, sections, base + symPtr, symCount, 18)
+            return Layout(base, base + 20 + optional, sections, base + symPtr, symCount, 18)
         }
         if (base + 56 > buf.capacity()) return null
         val sig1 = buf.getShort(base).toInt() and 0xFFFF
@@ -81,7 +88,7 @@ object CoffMingwFixer {
         val version = buf.getShort(base + 4).toInt() and 0xFFFF
         val bigMachine = buf.getShort(base + 6).toInt() and 0xFFFF
         if (sig1 == 0 && sig2 == 0xFFFF && version >= 2 && bigMachine == MACHINE_AMD64) {
-            return Layout(base + 56, buf.getInt(base + 44), base + buf.getInt(base + 48), buf.getInt(base + 52), 20)
+            return Layout(base, base + 56, buf.getInt(base + 44), base + buf.getInt(base + 48), buf.getInt(base + 52), 20)
         }
         return null
     }
@@ -134,6 +141,7 @@ object CoffMingwFixer {
         val textIndex = HashMap<String, Int>()
         names.forEachIndexed { i, n -> if (n.startsWith(".text$")) textIndex[n.removePrefix(".text$")] = i + 1 }
         if ("" !in textIndex) names.indexOf(".text").let { if (it >= 0) textIndex[""] = it + 1 }
+        val codeOf = unwindTargets(buf, l, names)
         var associated = 0
         var i = 0
         while (i < l.symbolCount) {
@@ -155,7 +163,7 @@ object CoffMingwFixer {
                 val name = names[sectionNumber - 1]
                 for (prefix in listOf(".pdata$", ".xdata$")) {
                     if (!name.startsWith(prefix)) continue
-                    val target = textIndex[name.removePrefix(prefix)]
+                    val target = codeOf[sectionNumber] ?: textIndex[name.removePrefix(prefix)]
                     val characteristics = buf.getInt(l.sectionTable + (sectionNumber - 1) * 40 + 36)
                     if (target != null && (characteristics and 0x1000) != 0) {
                         val a = at + l.symbolSize
@@ -169,5 +177,52 @@ object CoffMingwFixer {
             i += 1 + aux
         }
         return Result(ctors, associated)
+    }
+
+    /** Section number of a symbol, by its index in the symbol table. */
+    private fun symbolSection(buf: ByteBuffer, l: Layout, index: Int): Int {
+        if (index < 0 || index >= l.symbolCount) return 0
+        val at = l.symbolTable + index * l.symbolSize
+        return if (l.symbolSize == 20) buf.getInt(at + 12) else buf.getShort(at + 12).toInt()
+    }
+
+    /** The relocations of section [section] (1-based), as (offset in the section, symbol index). */
+    private fun relocations(buf: ByteBuffer, l: Layout, section: Int): List<Pair<Int, Int>> {
+        val header = l.sectionTable + (section - 1) * 40
+        val pointer = buf.getInt(header + 24)
+        var count = buf.getShort(header + 32).toInt() and 0xFFFF
+        val overflow = (buf.getInt(header + 36) and 0x01000000) != 0
+        if (pointer == 0) return emptyList()
+        var first = l.base + pointer
+        if (overflow && count == 0xFFFF) {
+            count = buf.getInt(first) - 1
+            first += 10
+        }
+        if (first + count * 10 > buf.capacity()) return emptyList()
+        return (0 until count).map { i ->
+            val at = first + i * 10
+            buf.getInt(at) to buf.getInt(at + 4)
+        }
+    }
+
+    /**
+     * For each `.pdata$` and `.xdata$` section, the code section it unwinds: what the first entry of
+     * the `.pdata` points into, and for an `.xdata`, the code of a `.pdata` entry pointing at it.
+     */
+    private fun unwindTargets(buf: ByteBuffer, l: Layout, names: List<String>): Map<Int, Int> {
+        val targets = HashMap<Int, Int>()
+        names.forEachIndexed { i, name ->
+            if (!name.startsWith(".pdata$")) return@forEachIndexed
+            val section = i + 1
+            val relocations = relocations(buf, l, section)
+            val code = relocations.firstOrNull { it.first == 0 }?.let { symbolSection(buf, l, it.second) } ?: 0
+            if (code <= 0 || code > names.size) return@forEachIndexed
+            targets[section] = code
+            relocations.filter { it.first == 8 }.forEach { (_, symbol) ->
+                val unwind = symbolSection(buf, l, symbol)
+                if (unwind > 0 && unwind <= names.size && names[unwind - 1].startsWith(".xdata$")) targets[unwind] = code
+            }
+        }
+        return targets
     }
 }

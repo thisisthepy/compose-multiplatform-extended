@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: b0b946b2324b7928ac2ebe6c5fd53bcdf111f1a5
+  CORE_EXTENDED_REF: 8130daf541ee89c9e089399fb759e78a0b73b96c
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
   # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
@@ -151,6 +151,7 @@ jobs:
   # Kotlin/Native targets too, and Kotlin/Native has no Linux arm64 host, so the arm64 cell
   # cannot build them itself. What the JVM images use is jars, which are the same everywhere.
   window-modules:
+    needs: core-compose
     name: Window modules for the JVM (built on Linux x64)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -165,6 +166,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      # The scene compiles against the core fork's Compose, and the GraalVM window layers'
+      # surfaces against the scene. The scene also declares macosArm64, which the toolchain
+      # resolves even when asked for the JVM, so it is built as a JVM module here.
+      - name: The core fork's Compose for the desktop
+        uses: actions/download-artifact@v4
+        with:
+          name: core-compose-desktop
+          path: ~/.m2/repository/org/thisisthepy/compose
+      - name: The scene as a JVM module
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          perl -0pi -e 's/^  platforms: \[ jvm, macosArm64 \]$/  platforms: [ jvm ]/m' scene/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
       - name: Publish the window modules to mavenLocal
         shell: bash
         working-directory: core-extended/extended/window
@@ -172,7 +187,7 @@ jobs:
           set -euo pipefail
           cp project.yaml project.yaml.all
           printf 'modules:\n' > project.yaml
-          for m in common graalvm/graalvm-macos graalvm/graalvm-linux; do printf '  - %s\n' "$m" >> project.yaml; done
+          for m in common scene graalvm/graalvm-macos graalvm/graalvm-linux; do printf '  - %s\n' "$m" >> project.yaml; done
           ./kotlin publish mavenLocal
           cp project.yaml.all project.yaml
           find ~/.m2/repository/org/thisisthepy/compose/window -name '*.pom' | sort
@@ -233,7 +248,7 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends \
             build-essential pkg-config xvfb xauth libgl1-mesa-dev libgl1-mesa-dri \
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
-            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq
+            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb
 
       - name: Liberica NIK 25
         shell: bash
@@ -268,6 +283,18 @@ jobs:
         with:
           name: window-modules-jvm
           path: ~/.m2/repository/org/thisisthepy/compose/window
+      - name: The core fork's Compose for the desktop
+        uses: actions/download-artifact@v4
+        with:
+          name: core-compose-desktop
+          path: ~/.m2/repository/org/thisisthepy/compose
+      - name: The scene as a JVM module
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          perl -0pi -e 's/^  platforms: \[ jvm, macosArm64 \]$/  platforms: [ jvm ]/m' scene/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
       - name: Publish the window modules to mavenLocal
         if: runner.os == 'macOS'
         shell: bash
@@ -275,10 +302,10 @@ jobs:
         run: |
           set -euo pipefail
           # The module lists are core-extended's own extended-window-publish matrix.
-          # The samples link the GraalVM window layers, which need no Compose. native/macos is
-          # the Kotlin/Native window and compiles against the core fork's macosArm64 Compose,
-          # which nothing here uses.
-          modules="common graalvm/graalvm-macos graalvm/graalvm-linux"
+          # The samples link the GraalVM window layers, and hello-awtfree hosts a scene in them.
+          # native/macos is the Kotlin/Native window and compiles against the core fork's
+          # macosArm64 Compose, which nothing here uses.
+          modules="common scene graalvm/graalvm-macos graalvm/graalvm-linux"
           cp project.yaml project.yaml.all
           printf 'modules:\n' > project.yaml
           for m in $modules; do printf '  - %s\n' "$m" >> project.yaml; done
@@ -286,11 +313,6 @@ jobs:
           cp project.yaml.all project.yaml
           find ~/.m2/repository/org/thisisthepy/compose/window -name '*.pom' | sort
 
-      - name: The core fork's Compose for the desktop
-        uses: actions/download-artifact@v4
-        with:
-          name: core-compose-desktop
-          path: ~/.m2/repository/org/thisisthepy/compose
 
       # skiko-awt with the AWT switch, published by the core fork as 0.144.6.1, a version above
       # the 0.144.6 Compose asks for; the AWT-free samples name it, so it is the one they resolve.

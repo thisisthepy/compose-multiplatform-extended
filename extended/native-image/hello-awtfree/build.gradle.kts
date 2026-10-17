@@ -1,8 +1,9 @@
-// The AWT-free application the one-executable gate checks: a window from the extended window
-// module, text laid out and drawn by Skia with the paragraph engine Compose's text uses, and no
-// AWT anywhere in the image. With HELLO_SELF_CHECK naming a PNG it also checks that Korean is
-// shaped, broken into words and wrapped correctly by what is linked into the executable, draws
-// that text into the PNG and exits, so a run nobody watches proves both.
+// The AWT-free Compose application the one-executable gate checks: Compose content hosted by
+// the core fork's scene module in its GraalVM window, drawn by Skia into the window's own
+// surface (Metal on macOS, GL on Linux), and no AWT anywhere in the image. With HELLO_SELF_CHECK
+// naming a PNG it also checks that Korean is shaped, broken into words and wrapped correctly by
+// what is linked into the executable, draws that text into the PNG, presents frames of the
+// Compose content and exits, so a run nobody watches proves all of it.
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
@@ -19,7 +20,10 @@ sourceSets.main {
 dependencies {
     implementation("org.thisisthepy.compose.window:common:0.1.0")
     implementation("org.thisisthepy.compose.window:$windowArtifact:0.1.0")
-    // skiko for this system: the paragraph engine and the raster surface the sample draws with.
+    // The scene host, and the core fork's foundation the content is written with.
+    implementation("org.thisisthepy.compose.window:scene:0.1.0")
+    implementation(compose.foundation)
+    // skiko for this system, and Compose UI for the desktop.
     implementation(compose.desktop.currentOs)
     // skiko-awt with the AWT switch, from compose-multiplatform-core-extended's
     // extended/skiko/build-skiko-awt.sh. Its version sorts above the 0.144.6 Compose asks for, so

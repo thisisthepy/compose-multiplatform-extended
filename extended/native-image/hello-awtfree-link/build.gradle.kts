@@ -5,7 +5,7 @@
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1-extended-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 
 val macos = System.getProperty("os.name").startsWith("Mac")

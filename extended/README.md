@@ -50,13 +50,17 @@ nothing in the executable that the application does not use.
 
 ## Install
 
-The fork is not on a public repository yet. Publish the plugin to your local Maven repository
-and put `mavenLocal()` ahead of the Gradle Plugin Portal:
+The fork is not on a public repository yet. Publish the core fork's Compose and then the plugin
+to your local Maven repository, and put `mavenLocal()` ahead of the Gradle Plugin Portal:
 
 ```sh
+# in a checkout of compose-multiplatform-core-extended, branch extended
+extended/compose/publish-local.sh desktop      # or macosArm64, linuxX64, linuxArm64
+
+# in this repository
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
 ```
 
 ```kotlin
@@ -74,12 +78,12 @@ dependencyResolutionManagement {
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1-extended-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 ```
 
-The plugin keeps JetBrains' ID for now. A rename to `org.thisisthepy.compose` is planned, see
-[The Gradle plugin](#the-gradle-plugin).
+The plugin has this fork's own ID, so it sits beside JetBrains' `org.jetbrains.compose` without
+either replacing the other. See [The Gradle plugin](#the-gradle-plugin).
 
 ## The three ways to ship
 
@@ -107,14 +111,12 @@ compose.desktop.application {
 
 ### Plugin IDs
 
-On `extended` today there is one plugin, and it keeps JetBrains' ID: `org.jetbrains.compose`
-(`gradle-plugins/compose/build.gradle.kts`). It handles all three outputs above, and the command
-line outputs too. Two IDs of this fork's own are planned, and neither is on `extended` yet:
+This fork has two plugin IDs of its own. Owner, 2026-10-05: one for Compose applications and one
+for command line programs.
 
-- **Compose desktop**, `org.thisisthepy.compose`: applications with a Compose window, in all
-  three outputs above. A Kotlin/Native window app is packaged. **Status: planned**, on the branch
-  [`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates)
-  (see [The Gradle plugin](#the-gradle-plugin)).
+- **Compose desktop**, `org.thisisthepy.compose` (`gradle-plugins/compose/build.gradle.kts`):
+  applications with a Compose window, in all three outputs above. A Kotlin/Native window app is
+  packaged. It handles the command line outputs too. See [The Gradle plugin](#the-gradle-plugin).
 - **Kotlin/Native desktop for command line programs**, `org.thisisthepy.kotlin.native.desktop`:
   no Compose and no window. **Status: open**, in
   [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31). The id follows the Kotlin build tooling's naming
@@ -211,7 +213,7 @@ for every task and the Linux and Windows prerequisites.
 | Kotlin/Native packaging and run tasks (macOS, Linux, Windows) | implemented | [`extended/gradle-plugin-kn`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/gradle-plugin-kn/README.md) |
 | Windows: a DPI-aware executable, and a check for an old MSVC toolset before the link | implemented | [#8](https://github.com/thisisthepy/compose-multiplatform-extended/pull/8) |
 | Windows on a real display (the probe renders off screen) | planned | [`extended/native-image`](https://github.com/thisisthepy/compose-multiplatform-extended/blob/extended/extended/native-image/README.md#not-yet) |
-| Plugin ID `org.thisisthepy.compose` | planned | branch [`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates) |
+| Plugin ID `org.thisisthepy.compose`, aliases resolving to the core fork's `org.thisisthepy.compose.*` libraries | implemented | [The Gradle plugin](#the-gradle-plugin) |
 
 The Compose libraries this pairs with, and the static skiko archive the image links, come from
 [thisisthepy/compose-multiplatform-core-extended](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md).
@@ -273,7 +275,7 @@ dependencyResolutionManagement {
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1-extended-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 
 dependencies {
@@ -320,52 +322,35 @@ type, and ProGuard's output is not what an image should be analysed from.
 
 ## The Gradle plugin
 
-### Today: org.jetbrains.compose
-
-On `extended` the plugin keeps JetBrains' ID and coordinate, so it must come from the local
-Maven repository ahead of the Gradle Plugin Portal (the `settings.gradle.kts` above):
-
-- plugin ID: `org.jetbrains.compose` (`gradle-plugins/compose/build.gradle.kts`)
-- artifact: `org.jetbrains.compose:compose-gradle-plugin`
-- version: whatever `-Pdeploy.version` says; `gradle-plugins/gradle.properties` defaults to
-  `9999.0.0-SNAPSHOT`. The probes and the `hello` sample use `1.11.1-extended-dev`.
-
-Publish it to the local repository the way the probe workflows do:
-
-```sh
-cd gradle-plugins
-./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
-```
-
-`-Pcompose.version` is the Compose version the plugin's aliases (`compose.desktop.currentOs`
-and the rest) resolve to. The core fork publishes its libraries at `1.11.1` under JetBrains'
-`org.jetbrains.compose.*` groups by default, so `1.11.1` reaches them. A consumer can publish them
-under another version: compose-rust publishes the desktop and macOS modules it changes as
-`1.11.1001` and skiko-awt as `0.144.6.1`, and asks for those by name (see the core fork's
-[Maven coordinates](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md#maven-coordinates)).
-Nothing is on a public repository yet.
-
-### Planned: org.thisisthepy.compose
-
-**Status: planned.** The branch
-[`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates)
-publishes the plugin under this fork's own name, so that it can sit beside JetBrains'
+The plugin is published under this fork's own name, so that it can sit beside JetBrains'
 `org.jetbrains.compose` without either replacing the other. The implementation class and the
-`compose { }` DSL stay JetBrains'.
+`compose { }` DSL stay JetBrains', so an existing build only changes its `plugins { }` line.
 
 - plugin ID: `org.thisisthepy.compose` (marker
   `org.thisisthepy.compose:org.thisisthepy.compose.gradle.plugin`)
 - artifact: `org.thisisthepy.compose:compose-gradle-plugin`
-- version: `<upstream version>-ext.<N>`, for example `1.11.1-ext.1`; `-ext.<N>-dev` for a local
-  build
-- the aliases resolve to compose-multiplatform-core-extended's `org.thisisthepy.compose.*`
-  libraries
+- version: `<upstream version>-ext.<N>`, `1.11.1-ext.1` by default (`gradle-plugins/gradle.properties`);
+  `-ext.<N>-dev` for a local build. The probes and samples use `1.11.1-ext.1-dev`.
+- the aliases (`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` and the rest)
+  resolve to compose-multiplatform-core-extended's `org.thisisthepy.compose.*` libraries at
+  `-Pcompose.version` (`1.11.1-ext.1`) and `-Pcompose.material3.version`
+  (`1.11.0-alpha07-ext.1`). `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
+  coordinate too.
+- the components and Compose HTML stay JetBrains', at the upstream version (`1.11.1`), because
+  the core fork does not build them.
 
-With that change the `plugins { }` line becomes:
+```sh
+cd gradle-plugins
+./gradlew --no-daemon :compose:publishToMavenLocal \
+    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
+```
 
 ```kotlin
 plugins {
     id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 ```
+
+The libraries the aliases name are not on a public repository yet; publish them from the core
+fork first (`extended/compose/publish-local.sh`, see the core fork's
+[Maven coordinates](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md#maven-coordinates)).

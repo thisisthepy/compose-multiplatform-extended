@@ -6,7 +6,7 @@
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1-extended-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 
 val macos = System.getProperty("os.name").startsWith("Mac")
@@ -21,6 +21,10 @@ dependencies {
     implementation("org.thisisthepy.compose.window:$windowArtifact:0.1.0")
     // skiko for this system: the paragraph engine and the raster surface the sample draws with.
     implementation(compose.desktop.currentOs)
+    // skiko-awt with the AWT switch, from compose-multiplatform-core-extended's
+    // extended/skiko/build-skiko-awt.sh. Its version sorts above the 0.144.6 Compose asks for, so
+    // it is the one the image takes.
+    implementation("org.jetbrains.skiko:skiko-awt:0.144.6.1")
 }
 
 compose.desktop.application {

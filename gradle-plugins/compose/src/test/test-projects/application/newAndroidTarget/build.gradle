@@ -2,7 +2,7 @@ plugins {
     id "org.jetbrains.kotlin.multiplatform"
     id "org.jetbrains.kotlin.plugin.compose"
     id "com.android.kotlin.multiplatform.library"
-    id "org.jetbrains.compose"
+    id "org.thisisthepy.compose"
 }
 
 kotlin {
@@ -18,10 +18,10 @@ kotlin {
     sourceSets {
         getByName("commonMain") {
             dependencies {
-                implementation("org.jetbrains.compose.ui:ui:COMPOSE_VERSION_PLACEHOLDER")
-                implementation("org.jetbrains.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
-                implementation("org.jetbrains.compose.foundation:foundation:COMPOSE_VERSION_PLACEHOLDER")
-                implementation("org.jetbrains.compose.material3:material3:1.9.0")
+                implementation("org.thisisthepy.compose.ui:ui:COMPOSE_VERSION_PLACEHOLDER")
+                implementation("org.thisisthepy.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
+                implementation("org.thisisthepy.compose.foundation:foundation:COMPOSE_VERSION_PLACEHOLDER")
+                implementation("org.thisisthepy.compose.material3:material3:COMPOSE_MATERIAL3_VERSION_PLACEHOLDER")
             }
         }
     }

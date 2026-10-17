@@ -17,6 +17,14 @@ object TestProperties {
     val composeVersion: String
         get() = notNullSystemProperty("compose.tests.compose.version")
 
+    // What JetBrains published the same Compose as, for the libraries this fork does not
+    // publish (components, Compose HTML).
+    val composeUpstreamVersion: String
+        get() = notNullSystemProperty("compose.tests.compose.upstream.version")
+
+    val composeMaterial3Version: String
+        get() = notNullSystemProperty("compose.tests.compose.material3.version")
+
     val gradleVersion: String
         get() = notNullSystemProperty("compose.tests.gradle.version")
 

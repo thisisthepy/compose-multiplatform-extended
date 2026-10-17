@@ -1,6 +1,6 @@
 plugins {
     id "org.jetbrains.kotlin.multiplatform"
-    id "org.jetbrains.compose"
+    id "org.thisisthepy.compose"
     id "org.jetbrains.kotlin.plugin.compose"
 }
 
@@ -15,8 +15,8 @@ kotlin {
         }
         named("jsMain") { 
             dependencies {
-                implementation("org.jetbrains.compose.html:html-core:COMPOSE_VERSION_PLACEHOLDER")
-                implementation("org.jetbrains.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
+                implementation("org.jetbrains.compose.html:html-core:COMPOSE_UPSTREAM_VERSION_PLACEHOLDER")
+                implementation("org.thisisthepy.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
             }
         }
         named("jvmMain") {

@@ -665,8 +665,8 @@ class ResourcesTest : GradlePluginTestBase() {
 
         modifyText("build.gradle.kts") { str ->
             str.replace(
-                "api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeVersion}\")",
-                "//api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeVersion}\")"
+                "api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeUpstreamVersion}\")",
+                "//api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeUpstreamVersion}\")"
             )
         }
         gradle("prepareKotlinIdeaImport").checks {
@@ -675,8 +675,8 @@ class ResourcesTest : GradlePluginTestBase() {
 
         modifyText("build.gradle.kts") { str ->
             str.replace(
-                "//api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeVersion}\")",
-                "api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeVersion}\")"
+                "//api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeUpstreamVersion}\")",
+                "api(\"org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeUpstreamVersion}\")"
             )
         }
         modifyText("build.gradle.kts") { str ->
@@ -828,7 +828,7 @@ class ResourcesTest : GradlePluginTestBase() {
                     |plugins {
                     |    kotlin("multiplatform")
                     |    kotlin("plugin.compose")
-                    |    id("org.jetbrains.compose")
+                    |    id("org.thisisthepy.compose")
                     |}
                     |
                     |kotlin {
@@ -850,9 +850,9 @@ class ResourcesTest : GradlePluginTestBase() {
                     |    sourceSets {
                     |        commonMain {
                     |            dependencies {
-                    |                implementation("org.jetbrains.compose.runtime:runtime:${defaultTestEnvironment.composeVersion}")
-                    |                implementation("org.jetbrains.compose.material:material:${defaultTestEnvironment.composeVersion}")
-                    |                implementation("org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeVersion}")
+                    |                implementation("org.thisisthepy.compose.runtime:runtime:${defaultTestEnvironment.composeVersion}")
+                    |                implementation("org.thisisthepy.compose.material:material:${defaultTestEnvironment.composeVersion}")
+                    |                implementation("org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeUpstreamVersion}")
                     |            }
                     |        }
                     |    }
@@ -877,7 +877,7 @@ class ResourcesTest : GradlePluginTestBase() {
                     |plugins {
                     |    kotlin("multiplatform")
                     |    kotlin("plugin.compose")
-                    |    id("org.jetbrains.compose")
+                    |    id("org.thisisthepy.compose")
                     |}
                     |
                     |kotlin {
@@ -897,9 +897,9 @@ class ResourcesTest : GradlePluginTestBase() {
                     |    sourceSets {
                     |        commonMain {
                     |            dependencies {
-                    |                implementation("org.jetbrains.compose.runtime:runtime:${defaultTestEnvironment.composeVersion}")
-                    |                implementation("org.jetbrains.compose.material:material:${defaultTestEnvironment.composeVersion}")
-                    |                implementation("org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeVersion}")
+                    |                implementation("org.thisisthepy.compose.runtime:runtime:${defaultTestEnvironment.composeVersion}")
+                    |                implementation("org.thisisthepy.compose.material:material:${defaultTestEnvironment.composeVersion}")
+                    |                implementation("org.jetbrains.compose.components:components-resources:${defaultTestEnvironment.composeUpstreamVersion}")
                     |            }
                     |        }
                     |    }

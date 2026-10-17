@@ -2,7 +2,7 @@ plugins {
     kotlin("multiplatform")
     kotlin("plugin.compose")
     id("com.android.kotlin.multiplatform.library")
-    id("org.jetbrains.compose")
+    id("org.thisisthepy.compose")
 }
 
 group = "app.group"
@@ -21,11 +21,11 @@ kotlin {
     sourceSets {
         commonMain {
             dependencies {
-                implementation("org.jetbrains.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
-                implementation("org.jetbrains.compose.material:material:COMPOSE_VERSION_PLACEHOLDER")
+                implementation("org.thisisthepy.compose.runtime:runtime:COMPOSE_VERSION_PLACEHOLDER")
+                implementation("org.thisisthepy.compose.material:material:COMPOSE_VERSION_PLACEHOLDER")
                 // there is the api to check correctness of the api configuration
                 // https://youtrack.jetbrains.com/issue/CMP-4405
-                api("org.jetbrains.compose.components:components-resources:COMPOSE_VERSION_PLACEHOLDER")
+                api("org.jetbrains.compose.components:components-resources:COMPOSE_UPSTREAM_VERSION_PLACEHOLDER")
             }
         }
     }

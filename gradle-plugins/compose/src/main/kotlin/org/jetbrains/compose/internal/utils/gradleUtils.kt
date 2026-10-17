@@ -39,15 +39,16 @@ fun Project.getLocalProperty(key: String): String? {
     }
 }
 
+// Artifacts this plugin's own build publishes beside it (preview-rpc, the JDK version probe).
 internal fun Project.detachedComposeGradleDependency(
     artifactId: String,
-    groupId: String = "org.jetbrains.compose",
+    groupId: String = ComposeBuildConfig.composeGradlePluginGroup,
 ): Configuration =
     detachedDependency(groupId = groupId, artifactId = artifactId, version = ComposeBuildConfig.composeGradlePluginVersion)
 
 internal fun Project.detachedComposeDependency(
     artifactId: String,
-    groupId: String = "org.jetbrains.compose",
+    groupId: String = ComposeBuildConfig.composeLibrariesGroup,
 ): Configuration =
     detachedDependency(groupId = groupId, artifactId = artifactId, version = ComposeBuildConfig.composeVersion)
 

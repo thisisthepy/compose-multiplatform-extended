@@ -5,6 +5,8 @@
 
 package org.jetbrains.compose.desktop.application.dsl
 
+import org.gradle.api.Action
+import org.gradle.api.file.CopySpec
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
@@ -55,6 +57,36 @@ abstract class NativeImageSettings @Inject constructor(objects: ObjectFactory) {
      */
     val windowsManifest: RegularFileProperty = objects.fileProperty()
 
-    /** Arguments passed to native-image after the ones this plugin needs. */
+    /**
+     * Arguments passed to native-image after the ones this plugin needs, as they are given.
+     * An application that calls native code through the Foreign Function and Memory API adds
+     * `--enable-native-access=ALL-UNNAMED` here (and to `jvmArgs`, which `runNativeImageAgent`
+     * passes on). A library's own `META-INF/native-image` metadata, `foreign` registrations
+     * included, needs nothing here: native-image reads it from the library's jar.
+     */
     val buildArgs: ListProperty<String> = objects.listProperty(String::class.java)
+
+    internal val besideExecutableSpecs: MutableList<Action<in CopySpec>> = mutableListOf()
+
+    /**
+     * Files the application needs beside its executable at run time, such as a language
+     * runtime's prefix directory. `stageNativeImage` copies the executable and these files
+     * into `build/compose/native-image-staged/<app>`, laid out as this spec says, and
+     * `packageApplication` then makes that directory.
+     *
+     * Opt-in: an application that names nothing here gets no staged directory, and
+     * `packageApplication` is the one executable alone. `packageNativeImage`'s own output is
+     * the one executable either way, so what it makes is still checked as one file.
+     *
+     * ```
+     * nativeImage {
+     *     besideExecutable {
+     *         from("python/prefix") { into("python") }
+     *     }
+     * }
+     * ```
+     */
+    fun besideExecutable(action: Action<in CopySpec>) {
+        besideExecutableSpecs += action
+    }
 }

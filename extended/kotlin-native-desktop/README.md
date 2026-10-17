@@ -42,8 +42,8 @@ the error lists the versions this has been verified with. The MSVC link runs on 
 `MsvcLinkPipeline` (package `org.thisisthepy.kotlin.gradle.nativedesktop.msvc`) does the link,
 and other plugin code can call it directly:
 
-1. The program is also built as a Kotlin/Native static library, with a generated function that
-   calls your `entryPoint`.
+1. The program is built as a Kotlin/Native static library, with a generated function that
+   calls your `entryPoint`. Kotlin/Native's own MinGW link of the executable is not run.
 2. Copies of that library and of MinGW's GCC runtime are rewritten so MSVC's linker keeps their
    meaning: static constructors move to `.CRT$XCU`, and unwind data becomes associative to its code.
 3. A generated C `main` (or `WinMain` for the Windows subsystem) calls the Kotlin entry point.
@@ -51,6 +51,13 @@ and other plugin code can call it directly:
 5. `linkCppStandardLibrary` (off by default) also links MSVC's `libcpmt.lib` with its runtime
    guard blanked, for programs that link C++ built with MSVC. Prebuilt MSVC libraries in
    `libraries` get the same blanking.
+6. A library whose C++ half has to be MSVC's cannot carry it in its klib, because the klib's
+   native code goes to Kotlin/Native's MinGW link. It publishes it beside the klib as a zip
+   with the classifier `msvc` (`lib/` to link, `runtime/` to copy next to the executable,
+   `msvc-link.properties` naming Windows import libraries and whether it needs `libcpmt.lib`).
+   For every module named in `linkBundles` that the program depends on, the link adds that
+   zip at the same version. The default names `org.thisisthepy.compose.skiko:skiko-mingwx64`,
+   skiko for mingwX64 with Skia, so a Compose program for Windows links with nothing extra.
 
 ## Try it
 

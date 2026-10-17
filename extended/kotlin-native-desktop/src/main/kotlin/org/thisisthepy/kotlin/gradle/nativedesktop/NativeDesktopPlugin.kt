@@ -10,6 +10,8 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.attributes.Attribute
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
@@ -35,6 +37,7 @@ import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.KonanMingwRuntime
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MainSignature
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcDetector
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcEntryCode
+import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcLinkBundle
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcLinkException
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcLinkPipeline
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcLinkSpec
@@ -49,9 +52,9 @@ import javax.inject.Inject
 /**
  * Kotlin/Native desktop programs, with or without Compose.
  *
- * On Windows every `mingwX64` executable ends as an executable linked by MSVC: after
- * Kotlin/Native writes its MinGW executable, the same program is built as a static library and
- * relinked with Microsoft's linker over the same file. The tasks keep Kotlin's own names
+ * On Windows every `mingwX64` executable is linked by MSVC: the program is built as a
+ * Kotlin/Native static library and linked with Microsoft's linker into the file Kotlin's link
+ * task names, in place of Kotlin/Native's MinGW link. The tasks keep Kotlin's own names
  * (`linkReleaseExecutableMingwX64`, `runReleaseExecutableMingwX64`), and the settings live in
  * the `kotlin` block:
  *
@@ -101,6 +104,15 @@ open class MsvcSettings @Inject constructor(objects: ObjectFactory) {
 
     /** Prebuilt MSVC `.lib` files to link, such as a C++ library. Their runtime guards are blanked. */
     val libraries: ConfigurableFileCollection = objects.fileCollection()
+
+    /**
+     * Libraries whose MSVC half is linked when the program depends on them, as `group:module`.
+     * Each publishes it beside its klib as a zip with the classifier `msvc` ([MsvcLinkBundle]).
+     * The default names skiko for mingwX64 as this fork publishes it, which carries skiko's C++
+     * half and Skia.
+     */
+    val linkBundles: ListProperty<String> = objects.listProperty(String::class.java)
+        .convention(listOf("org.thisisthepy.compose.skiko:skiko-mingwx64"))
 
     /** Extra Windows import libraries, for example `d3d12.lib`. */
     val systemLibraries: ListProperty<String> = objects.listProperty(String::class.java)
@@ -199,7 +211,11 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
     }
 
     val main = target.compilations.getByName("main")
-    val sourceDirs = main.allKotlinSourceSets.flatMap { it.kotlin.srcDirs }.toList()
+    // The program's own sources: not the entries generated for its other executables, which are
+    // added to the same compilation and are another task's output.
+    val generatedEntries = project.layout.buildDirectory.dir("generated/msvcEntry").get().asFile
+    val sourceDirs = main.allKotlinSourceSets.flatMap { it.kotlin.srcDirs }
+        .filterNot { it.toPath().startsWith(generatedEntries.toPath()) }
     val generate = project.tasks.register("generateMsvcEntry$name", GenerateMsvcEntry::class.java) {
         it.entryPoint.set(project.provider { executable.entryPoint ?: "main" })
         it.symbol.set(symbol)
@@ -215,9 +231,41 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
     val library = target.binaries.getStaticLib(prefix, executable.buildType)
     library.linkTaskProvider.configure { it.dependsOn(check) }
 
+    // The MSVC halves of the libraries the program depends on (MsvcLinkBundle): for each module
+    // in linkBundles that the compilation resolves, its msvc zip at the same version. The
+    // compilation's attributes pick the mingwX64 variant, whose artifact the classifier replaces.
+    val compileDependencies = project.configurations.getByName(main.compileDependencyConfigurationName)
+    val bundles = project.configurations.create("msvcLinkBundles$name") { configuration ->
+        configuration.isCanBeConsumed = false
+        configuration.isCanBeResolved = true
+        configuration.isTransitive = false
+        configuration.description = "The msvc zips of the libraries ${executable.name} for ${target.name} depends on."
+        configuration.attributes { attributes ->
+            for (key in compileDependencies.attributes.keySet()) {
+                @Suppress("UNCHECKED_CAST")
+                val attribute = key as Attribute<Any>
+                compileDependencies.attributes.getAttribute(attribute)?.let { attributes.attribute(attribute, it) }
+            }
+        }
+        configuration.withDependencies { dependencies ->
+            val wanted = settings.linkBundles.get().toSet()
+            compileDependencies.incoming.resolutionResult.allComponents
+                .mapNotNull { it.id as? ModuleComponentIdentifier }
+                .filter { "${it.group}:${it.module}" in wanted }
+                .forEach {
+                    dependencies.add(
+                        project.dependencies.create("${it.group}:${it.module}:${it.version}:${MsvcLinkBundle.CLASSIFIER}@zip")
+                    )
+                }
+        }
+    }
+
     val workDirectory = project.layout.buildDirectory.dir("msvc/$name").get().asFile
     executable.linkTaskProvider.configure { task ->
         task.dependsOn(check, library.linkTaskProvider)
+        // Kotlin/Native's MinGW link of the same program is not run: its output is replaced by
+        // the MSVC link, and with a library whose C++ half is MSVC's (skiko's) it cannot link.
+        task.actions.clear()
         // The relink is part of this task, so what it depends on decides whether the task reruns.
         task.inputs.property("msvc.rewriteMingwObjects", settings.rewriteMingwObjects)
         task.inputs.property("msvc.subsystem", settings.subsystem.map { it.name })
@@ -225,6 +273,7 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
         task.inputs.property("msvc.systemLibraries", settings.systemLibraries)
         task.inputs.property("msvc.minimumToolset", settings.minimumToolset).optional(true)
         task.inputs.files(settings.libraries).withPropertyName("msvc.libraries")
+        task.inputs.files(bundles).withPropertyName("msvc.linkBundles")
         task.inputs.files(settings.manifest, settings.icon).withPropertyName("msvc.resources")
         task.inputs.files(library.linkTaskProvider.map { it.outputFile }).withPropertyName("msvc.staticLibrary")
         task.doLast {
@@ -235,6 +284,9 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
                     "though the mingwX64 build just ran."
             )
             val output = task.outputFile.get()
+            val unpacked = bundles.files.sortedBy { it.name }.map {
+                MsvcLinkBundle.unpack(it, File(workDirectory, "bundles/${it.nameWithoutExtension}"))
+            }
             val spec = MsvcLinkSpec(
                 name = executable.baseName,
                 toolchain = toolchain,
@@ -243,11 +295,11 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
                 workDir = workDirectory,
                 outputFile = output,
                 subsystem = settings.subsystem.get(),
-                extraLibraries = settings.libraries.files.toList(),
-                linkCppStandardLibrary = settings.linkCppStandardLibrary.get(),
+                extraLibraries = settings.libraries.files.toList() + unpacked.flatMap { it.libraries },
+                linkCppStandardLibrary = settings.linkCppStandardLibrary.get() || unpacked.any { it.cppStandardLibrary },
                 manifest = settings.manifest.asFile.orNull,
                 icon = settings.icon.asFile.orNull,
-                systemLibraries = settings.systemLibraries.get(),
+                systemLibraries = (settings.systemLibraries.get() + unpacked.flatMap { it.systemLibraries }).distinct(),
                 kotlinEntrySymbol = symbol,
                 rewriteMingwObjects = settings.rewriteMingwObjects.get(),
             )
@@ -255,6 +307,9 @@ private fun relinkWithMsvc(project: Project, settings: MsvcSettings, target: Kot
                 MsvcLinkPipeline(spec).run()
             } catch (e: MsvcLinkException) {
                 throw GradleException(e.message ?: "the MSVC link failed", e)
+            }
+            for (file in unpacked.flatMap { it.runtimeFiles }) {
+                file.copyTo(File(output.parentFile, file.name), overwrite = true)
             }
         }
     }

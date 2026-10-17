@@ -61,6 +61,9 @@ abstract class NativeApplicationMacOSPlatformSettings : AbstractMacOSPlatformSet
     /** Also make one executable that runs on both Apple Silicon and Intel, when both targets are declared. */
     var universalBinary: Boolean = false
 
+    /** Sign for the Mac App Store ("3rd Party Mac Developer" certificates, and a `.pkg` signed with the installer one). */
+    var appStore: Boolean = false
+
     /** Replaces the entitlements the plugin signs with. */
     val entitlementsFile: RegularFileProperty = objects.fileProperty()
 

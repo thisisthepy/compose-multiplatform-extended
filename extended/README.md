@@ -21,7 +21,9 @@ the fork of the Compose libraries.
   runtime beside it (macOS arm64, Linux x64, Windows x64).
 - `runNativeImageAgent`: records the reachability metadata the image is built from.
 - AWT-free windows: with `windowing = ApplicationWindowing.AwtFree` the window comes from the
-  extended window modules, not from the JDK's AWT. The window C layers (`appkit_window.m` on
+  extended window modules, not from the JDK's AWT. The window, input, IME, menu and chrome code
+  lives in those modules, in core-extended's
+  [`extended/window`](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md#window-modules), not in this plugin. The window C layers (`appkit_window.m` on
   macOS, `x11_window.c` on Linux) are compiled and linked into the image, and CI builds and starts
   that image in the "Package (macos-arm64)" and "Package (linux-x64)" jobs of the "Extended native
   image" workflow. Windows is not implemented yet: its shared Win32 window layer is open in
@@ -35,6 +37,9 @@ the fork of the Compose libraries.
 - Run tasks for every output, and a Windows application that is DPI aware on a scaled display.
 - Upstream's `compose` DSL and public API are unchanged, so an existing Compose project keeps
   working. New settings are additive.
+- Design systems and the Liquid Glass material come from core-extended's
+  [`extended/design-systems`](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/design-systems/README.md), which
+  depends on published Compose only and never on a renderer.
 
 ## Why use it
 
@@ -84,7 +89,9 @@ The plugin keeps JetBrains' ID for now. A rename to `org.thisisthepy.compose` is
 | GraalVM native image | one executable, no runtime | `packageNativeImage` | [One executable](#one-executable-packagenativeimage) below |
 | Kotlin/Native | one executable per target, packaged with the same `TargetFormat`s (table below), or the bare `.kexe`/`.exe` for a command line program | `packageKotlinNative` |
 
-`packageApplication` runs the one the `output` setting names:
+The two native outputs, GraalVM native-image and Kotlin/Native, each produce one executable per
+application, with no Java runtime beside it. `packageApplication` runs the one the `output`
+setting names:
 
 ```kotlin
 compose.desktop.application {
@@ -98,12 +105,19 @@ compose.desktop.application {
 }
 ```
 
-### Two plugins
+### Plugin IDs
+
+On `extended` today there is one plugin, and it keeps JetBrains' ID: `org.jetbrains.compose`
+(`gradle-plugins/compose/build.gradle.kts`). It handles all three outputs above, and the command
+line outputs too. Two IDs of this fork's own are planned, and neither is on `extended` yet:
 
 - **Compose desktop**, `org.thisisthepy.compose`: applications with a Compose window, in all
-  three outputs above. A Kotlin/Native window app is packaged.
+  three outputs above. A Kotlin/Native window app is packaged. **Status: planned**, on the branch
+  [`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates)
+  (see [The Gradle plugin](#the-gradle-plugin)).
 - **Kotlin/Native desktop for command line programs**, `org.thisisthepy.kotlin.native.desktop`:
-  no Compose and no window. The id follows the Kotlin build tooling's naming
+  no Compose and no window. **Status: open**, in
+  [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31). The id follows the Kotlin build tooling's naming
   (`org.jetbrains.kotlin.native.cocoapods` maps to `org.thisisthepy.kotlin.native.<feature>`).
   Owner, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
 
@@ -161,16 +175,21 @@ upstream's `nativeDistributions` formats.
 
 ### Windows needs the MSVC Build Tools
 
-Every `mingwX64` target ships as a final MSVC executable. Kotlin/Native compiles MinGW objects,
-which are rewritten so the MSVC linker accepts them, and the MSVC linker links them with Skia
-and the window C layer, which are MSVC builds. There is no MinGW-only path. The owner decided
-this on 2026-10-05:
+The final link of a Windows executable is MSVC's, on both native paths. A GraalVM native image
+on Windows is linked by MSVC today. Every `mingwX64` target ships as a final MSVC executable too:
+Kotlin/Native compiles MinGW objects, which are rewritten so the MSVC linker accepts them, and the
+MSVC linker links them with Skia and the window C layer, which are MSVC builds. There is no
+MinGW-only path. The owner decided this on 2026-10-05:
 
 > [user] "Msvc 있어야 하는게 뭐 어때서? 나는 물어보는거잖아. Mingw 우회 구현을 넣지 마. Extended는 Mingw 타겟도 전부 최종 msvc 앱으로 나가도록 하면 되는거지 그냥."
 
 Install Visual Studio Build Tools with the MSVC toolset v14.51 or later, `clang-cl` and the
-Windows SDK. The build looks for them at its start and stops with an install message when one
-is missing. The GraalVM native image on Windows has the same toolset requirement (below).
+Windows SDK. The GraalVM native image on Windows has the same toolset requirement (below).
+
+**Status: open** for Kotlin/Native. The MSVC link step for `mingwX64` is in
+[#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31), and the check that finds the
+tools at the start of the build and stops with an install message when one is missing is in
+[#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26). Neither is on `extended` yet.
 
 ### macOS signing and notarization
 
@@ -320,7 +339,12 @@ cd gradle-plugins
 ```
 
 `-Pcompose.version` is the Compose version the plugin's aliases (`compose.desktop.currentOs`
-and the rest) resolve to. Nothing is on a public repository yet.
+and the rest) resolve to. The core fork publishes its libraries at `1.11.1` under JetBrains'
+`org.jetbrains.compose.*` groups by default, so `1.11.1` reaches them. A consumer can publish them
+under another version: compose-rust publishes the desktop and macOS modules it changes as
+`1.11.1001` and skiko-awt as `0.144.6.1`, and asks for those by name (see the core fork's
+[Maven coordinates](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md#maven-coordinates)).
+Nothing is on a public repository yet.
 
 ### Planned: org.thisisthepy.compose
 

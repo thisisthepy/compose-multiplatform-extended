@@ -16,11 +16,12 @@ Compose Gradle 플러그인의 저장소인
 - 애플리케이션 하나, 출력 셋: `output = ApplicationOutput.Jvm`, `NativeImage`, `KotlinNative`. 이름, 버전, 제작사, 아이콘, 리소스는 `nativeDistributions` 에 한 번만 적습니다.
 - `packageNativeImage`: 애플리케이션을 GraalVM native-image 실행 파일 하나로 만듭니다. 옆에 Java 런타임이 없습니다 (macOS arm64, Linux x64, Windows x64).
 - `runNativeImageAgent`: 이미지를 빌드할 때 쓰는 reachability 메타데이터를 기록합니다.
-- AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다. 창 C 계층(macOS 의 `appkit_window.m`, Linux 의 `x11_window.c`)은 이미지에 컴파일되어 링크되며, CI 의 "Extended native image" 워크플로 중 "Package (macos-arm64)" 와 "Package (linux-x64)" 잡이 그 이미지를 빌드하고 실행합니다. Windows 는 아직 구현되지 않았습니다. 공유 Win32 창 계층은 core-extended [#32](https://github.com/thisisthepy/compose-multiplatform-core-extended/pull/32) 와 compose-rust [#174](https://github.com/DarkPyonix/compose-rust/pull/174) 에서 열려 있습니다.
+- AWT 없는 창: `windowing = ApplicationWindowing.AwtFree` 를 쓰면 창이 JDK 의 AWT 가 아니라 extended 창 모듈에서 옵니다. 창, 입력, IME, 메뉴, 크롬 코드는 이 플러그인이 아니라 core-extended 의 [`extended/window`](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README_ko.md#창-모듈) 에 있는 그 모듈들에 있습니다. 창 C 계층(macOS 의 `appkit_window.m`, Linux 의 `x11_window.c`)은 이미지에 컴파일되어 링크되며, CI 의 "Extended native image" 워크플로 중 "Package (macos-arm64)" 와 "Package (linux-x64)" 잡이 그 이미지를 빌드하고 실행합니다. Windows 는 아직 구현되지 않았습니다. 공유 Win32 창 계층은 core-extended [#32](https://github.com/thisisthepy/compose-multiplatform-core-extended/pull/32) 와 compose-rust [#174](https://github.com/DarkPyonix/compose-rust/pull/174) 에서 열려 있습니다.
 - macOS, Linux, Windows 용 Kotlin/Native 데스크톱 패키징 태스크. 업스트림의 `TargetFormat` 이름을 그대로 씁니다. 병합되어 단위 테스트를 거쳤지만 아직 CI 에서 빌드하지는 않았습니다. 실제 앱을 링크하고 패키징하는 CI 셀은 [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26) 에 있습니다. 형식별 상태는 아래 "Kotlin/Native 앱 종류별 출력" 을 보십시오.
 - 명령줄 프로그램은 `.kexe`(macOS 에서는 서명) 또는 `.exe` 이고 패키징은 하지 않습니다.
 - 모든 출력의 실행 태스크, 그리고 배율이 적용된 화면에서 DPI 를 인식하는 Windows 애플리케이션.
 - 업스트림의 `compose` DSL 과 공개 API 는 그대로입니다. 기존 Compose 프로젝트가 그대로 동작하고, 새 설정은 추가만 합니다.
+- 디자인 시스템과 Liquid Glass 재질은 core-extended 의 [`extended/design-systems`](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/design-systems/README.md) 에서 옵니다. 배포된 Compose 에만 의존하고 렌더러에는 절대 의존하지 않습니다.
 
 ## 왜 쓰는가
 
@@ -49,12 +50,17 @@ JetBrains 의 ID 를 그대로 씁니다. `org.thisisthepy.compose` 로 바꾸�
 | GraalVM native image | 런타임 없는 실행 파일 하나 | `packageNativeImage` | 아래 "실행 파일 하나" |
 | Kotlin/Native | 타깃마다 실행 파일 하나를 같은 `TargetFormat` 으로 패키징(아래 표), 명령줄 프로그램은 패키징 없는 `.kexe`/`.exe` | `packageKotlinNative` |
 
-`packageApplication` 은 `output` 설정이 가리키는 출력을 실행합니다.
+두 네이티브 출력인 GraalVM native-image 와 Kotlin/Native 는 각각 애플리케이션마다 실행 파일 하나를
+만들고, 옆에 Java 런타임을 두지 않습니다. `packageApplication` 은 `output` 설정이 가리키는 출력을 실행합니다.
 
-### 플러그인 둘
+### 플러그인 ID
 
-- **Compose 데스크톱**, `org.thisisthepy.compose`: Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다. 창이 있는 Kotlin/Native 앱은 패키징합니다.
-- **명령줄 프로그램용 Kotlin/Native 데스크톱**, `org.thisisthepy.kotlin.native.desktop`: Compose 도 창도 없습니다. ID 는 Kotlin 빌드 도구의 이름 규칙을 따릅니다
+지금 `extended` 에는 플러그인이 하나 있고, JetBrains 의 ID `org.jetbrains.compose` 를 그대로 씁니다
+(`gradle-plugins/compose/build.gradle.kts`). 위 세 출력과 명령줄 출력을 모두 이 플러그인이 맡습니다. 이 포크
+자신의 ID 둘은 계획이며, 어느 것도 아직 `extended` 에 없습니다.
+
+- **Compose 데스크톱**, `org.thisisthepy.compose`: Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다. 창이 있는 Kotlin/Native 앱은 패키징합니다. **상태: 계획.** [`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates) 브랜치에 있습니다([Gradle 플러그인](#gradle-플러그인) 참고).
+- **명령줄 프로그램용 Kotlin/Native 데스크톱**, `org.thisisthepy.kotlin.native.desktop`: Compose 도 창도 없습니다. **상태: 열림.** [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31) 에 있습니다. ID 는 Kotlin 빌드 도구의 이름 규칙을 따릅니다
   (`org.jetbrains.kotlin.native.cocoapods` 는 `org.thisisthepy.kotlin.native.<feature>` 에 대응합니다). 소유자, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
 
 Kotlin/Native 앱 종류별 출력입니다. 소유자, 2026-10-05:
@@ -99,14 +105,19 @@ Velopack 은 모든 OS 의 직접 배포 형식(Windows `Setup.exe` 와 `.msi`, 
 
 ### Windows 는 MSVC Build Tools 가 필요하다
 
-모든 `mingwX64` 타깃은 최종 MSVC 실행 파일로 나갑니다. Kotlin/Native 는 MinGW 오브젝트를 만들고, 이를
+Windows 실행 파일의 최종 링크는 두 네이티브 경로 모두 MSVC 의 것입니다. Windows 의 GraalVM native image 는
+지금 MSVC 가 링크합니다. 모든 `mingwX64` 타깃도 최종 MSVC 실행 파일로 나갑니다. Kotlin/Native 는 MinGW 오브젝트를 만들고, 이를
 MSVC 링커가 받아들이도록 고쳐 씁니다. 그다음 MSVC 링커가 Skia 와 창 C 계층(둘 다 MSVC 빌드)과 함께
 링크합니다. MinGW 만 쓰는 경로는 없습니다. 소유자가 2026-10-05 에 정한 일입니다.
 
 > [user] "Msvc 있어야 하는게 뭐 어때서? 나는 물어보는거잖아. Mingw 우회 구현을 넣지 마. Extended는 Mingw 타겟도 전부 최종 msvc 앱으로 나가도록 하면 되는거지 그냥."
 
-MSVC 툴셋 v14.51 이상, `clang-cl`, Windows SDK 가 있는 Visual Studio Build Tools 를 설치합니다. 빌드는 시작할 때
-이들을 찾고, 하나라도 없으면 설치 방법을 알려 주며 멈춥니다.
+MSVC 툴셋 v14.51 이상, `clang-cl`, Windows SDK 가 있는 Visual Studio Build Tools 를 설치합니다. Windows 의 GraalVM
+native image 도 같은 툴셋이 필요합니다(아래).
+
+Kotlin/Native 쪽은 **상태: 열림.** `mingwX64` 의 MSVC 링크 단계는 [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31) 에 있고,
+빌드를 시작할 때 도구를 찾아 하나라도 없으면 설치 방법을 알려 주며 멈추는 검사는 [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26)
+에 있습니다. 둘 다 아직 `extended` 에 없습니다.
 
 ### macOS 서명과 공증
 
@@ -241,7 +252,11 @@ cd gradle-plugins
 ```
 
 `-Pcompose.version` 은 플러그인의 별칭 (`compose.desktop.currentOs` 등) 이 가리키는 Compose
-버전입니다. 아직 공개 저장소에 올린 것은 없습니다.
+버전입니다. core 포크는 기본으로 JetBrains 의 `org.jetbrains.compose.*` 그룹 아래 `1.11.1` 로 라이브러리를
+배포하므로, `1.11.1` 이면 그것을 가져옵니다. 사용하는 쪽은 다른 버전으로 배포할 수 있습니다. compose-rust 는
+자신이 바꾸는 데스크톱과 macOS 모듈을 `1.11.1001` 로, skiko-awt 를 `0.144.6.1` 로 배포하고, 그 버전을 이름으로
+요청합니다(core 포크의 [Maven 좌표](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README_ko.md#maven-좌표) 참고).
+아직 공개 저장소에 올린 것은 없습니다.
 
 ### 계획: org.thisisthepy.compose
 

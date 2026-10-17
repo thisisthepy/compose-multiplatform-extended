@@ -43,6 +43,11 @@ compose.desktop.application {
         if (macos) buildArgs.add("-H:-RunMainInNewThread")
         // The sample's text is Korean; the image keeps the locale data it needs.
         buildArgs.add("-H:IncludeLocales=en,ko")
+        // NATIVE_IMAGE_CALL_TREE set: the analysis call tree is written to the reports folder, to
+        // find what makes something reachable.
+        if (providers.environmentVariable("NATIVE_IMAGE_CALL_TREE").isPresent) {
+            buildArgs.addAll("-H:+PrintAnalysisCallTree", "-H:PrintAnalysisCallTreeType=TXT")
+        }
         providers.environmentVariable("SKIKO_STATIC").orNull?.let { skikoStaticDirectory.set(file(it)) }
     }
 }

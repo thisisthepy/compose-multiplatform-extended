@@ -332,6 +332,8 @@ jobs:
         env:
           SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
           CORE_EXTENDED: ${{ github.workspace }}/core-extended
+          # Temporary, while what reaches AWT from the Compose scene is found.
+          NATIVE_IMAGE_CALL_TREE: '1'
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
@@ -414,4 +416,5 @@ jobs:
           path: |
             extended/native-image/*/build/tmp/packageNativeImage/**/*.log
             extended/native-image/*/build/reports/
+            extended/native-image/*/build/compose/native-image/*/reports/
           if-no-files-found: ignore

@@ -290,6 +290,40 @@ jobs:
           fi
           grep -q "link check ok" out.txt
 
+      # The flags an application calling native code through the Foreign Function and Memory API
+      # adds, and files staged beside the executable. ffm-lib, a dependency, registers its
+      # downcalls and its upcall in its own jar's META-INF/native-image and the application
+      # registers none, so a run that works shows native-image read the library's metadata.
+      - name: packageNativeImage and stageNativeImage (FFM sample)
+        working-directory: extended/native-image/hello-ffm
+        env:
+          SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
+          CORE_EXTENDED: ${{ github.workspace }}/core-extended
+        shell: bash
+        run: ./gradlew --no-daemon --info packageNativeImage stageNativeImage
+
+      - name: Start the FFM sample from its staged directory
+        working-directory: extended/native-image/hello-ffm
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(find build/compose/native-image -mindepth 1 -maxdepth 1 -type d | head -1)"
+          # Staging leaves packageNativeImage's output alone: still the one executable.
+          ls -la "$out"
+          [ "$(ls -A "$out" | wc -l | tr -d ' ')" -eq 1 ]
+          name="$(ls -A "$out")"
+          staged="build/compose/native-image-staged/$(basename "$out")"
+          find "$staged" | sort
+          run="$RUNNER_TEMP/ffm/app"; rm -rf "$RUNNER_TEMP/ffm"; mkdir -p "$RUNNER_TEMP/ffm"; cp -R "$staged" "$run"
+          # Started from another directory, so the prefix is found from the executable's own path.
+          cd "$RUNNER_TEMP/ffm"
+          status=0
+          perl -e 'alarm 120; exec @ARGV' "$run/$name" > ffm.txt 2>&1 || status=$?
+          cat ffm.txt
+          [ "$status" -eq 0 ]
+          grep -q "ffm check ok" ffm.txt
+          if grep -q "restricted method" ffm.txt; then echo "native access was not enabled"; exit 1; fi
+
       - name: "compose-rust/pythonx: config check on the generated metadata"
         shell: bash
         run: |

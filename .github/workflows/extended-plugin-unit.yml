@@ -1,0 +1,45 @@
+# Unit tests of the Gradle plugin's fork-only code (extended/gradle-plugin-kn) and the manifest
+# and windowing tests. No paths filter: a required check that is skipped blocks the merge. The
+# inherited gradle-plugin.yml is left alone, it fails at Setup Prerequisites.
+name: Extended plugin unit tests
+
+on:
+  pull_request:
+    branches: [ extended ]
+  workflow_dispatch:
+
+concurrency:
+  group: extended-plugin-unit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'jetbrains'
+          java-version: '25'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: Run the unit tests
+        working-directory: gradle-plugins
+        run: |
+          ./gradlew :compose:test \
+            --tests 'org.jetbrains.compose.desktop.application.extended.*' \
+            --tests 'org.jetbrains.compose.test.tests.unit.NativeImage*'
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-unit-reports
+          path: gradle-plugins/compose/build/reports

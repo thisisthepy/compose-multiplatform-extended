@@ -297,7 +297,8 @@ The `nativeImage { }` block takes:
 | `skikoStaticDirectory` | `build-skiko-static-jvm.sh` output: `libskiko-static.a` (`skiko-static.lib` on Windows) and `skia/` | required |
 | `imageName` | The executable's name | the application's package name |
 | `metadataDirectory` | Where `runNativeImageAgent` writes and `packageNativeImage` reads the metadata | `src/main/native-image` |
-| `buildArgs` | Extra arguments for native-image, after the plugin's own | none |
+| `buildArgs` | Extra arguments for native-image, passed unchanged after the plugin's own (for FFM, `--enable-native-access=ALL-UNNAMED`) | none |
+| `besideExecutable { }` | A copy spec of files the application needs beside its executable; `stageNativeImage` lays them out with it in `build/compose/native-image-staged/<app>` | nothing staged |
 
 [`extended/native-image/hello`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/extended/extended/native-image/hello)
 is a complete project set up this way.
@@ -314,8 +315,13 @@ merging what it sees into `metadataDirectory`. The agent writes on a clean exit,
 application rather than kill it. Run it again after a change that reaches new classes or
 resources. Keep the directory with the sources, because `packageNativeImage` builds from it.
 
-`packageNativeImage` writes one executable and nothing beside it. It is registered once per
-application rather than once per build type: GraalVM optimises the image whatever the build
+A library's `META-INF/native-image` metadata, `foreign` registrations for FFM included, is read
+by native-image from the library's jar and needs nothing in this block.
+
+`packageNativeImage` writes one executable and nothing beside it, even when `besideExecutable`
+names files: those go to the staged directory, which `packageApplication` then makes.
+
+It is registered once per application rather than once per build type: GraalVM optimises the image whatever the build
 type, and ProGuard's output is not what an image should be analysed from.
 
 ## The Gradle plugin

@@ -210,7 +210,8 @@ compose.desktop.application {
 | `skikoStaticDirectory` | `build-skiko-static-jvm.sh` 의 출력: `libskiko-static.a` (Windows 에서는 `skiko-static.lib`) 와 `skia/` | 필수 |
 | `imageName` | 실행 파일 이름 | 애플리케이션의 패키지 이름 |
 | `metadataDirectory` | `runNativeImageAgent` 가 쓰고 `packageNativeImage` 가 읽는 메타데이터 위치 | `src/main/native-image` |
-| `buildArgs` | 플러그인 자신의 인자 뒤에 붙는 native-image 인자 | 없음 |
+| `buildArgs` | 플러그인 자신의 인자 뒤에 그대로 붙는 native-image 인자 (FFM 이라면 `--enable-native-access=ALL-UNNAMED`) | 없음 |
+| `besideExecutable { }` | 실행 파일 옆에 있어야 하는 파일의 copy spec. `stageNativeImage` 가 실행 파일과 함께 `build/compose/native-image-staged/<app>` 에 배치합니다 | 배치하지 않음 |
 
 [`extended/native-image/hello`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/extended/extended/native-image/hello)
 가 이렇게 설정한 완전한 프로젝트입니다.
@@ -227,8 +228,14 @@ compose.desktop.application {
 끝내지 말고 닫아야 합니다. 새 클래스나 리소스에 닿는 변경을 했다면 다시 실행합니다. 이 디렉터리는
 소스와 함께 둡니다. `packageNativeImage` 가 여기서 빌드하기 때문입니다.
 
-`packageNativeImage` 는 실행 파일 하나만 쓰고 옆에 아무것도 두지 않습니다. 빌드 타입마다가 아니라
-애플리케이션마다 한 번 등록됩니다. GraalVM 은 빌드 타입과 상관없이 이미지를 최적화하고, ProGuard 의
+라이브러리의 `META-INF/native-image` 메타데이터는 FFM 의 `foreign` 등록까지 포함해 native-image 가
+라이브러리 jar 에서 직접 읽으므로, 이 블록에 따로 적을 것이 없습니다.
+
+`packageNativeImage` 는 실행 파일 하나만 쓰고 옆에 아무것도 두지 않습니다. `besideExecutable` 에 파일을
+적어도 마찬가지입니다. 그 파일은 별도의 staged 디렉터리로 가고, `packageApplication` 은 그 디렉터리를
+만듭니다.
+
+`packageNativeImage` 는 빌드 타입마다가 아니라 애플리케이션마다 한 번 등록됩니다. GraalVM 은 빌드 타입과 상관없이 이미지를 최적화하고, ProGuard 의
 출력은 이미지를 분석할 대상이 아니기 때문입니다.
 
 ## Gradle 플러그인

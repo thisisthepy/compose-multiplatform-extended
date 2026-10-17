@@ -1,0 +1,23 @@
+{
+  "reflection": [
+    {
+      "type": "org.thisisthepy.sample.ffm.NativeCalls",
+      "methods": [
+        {
+          "name": "compare",
+          "parameterTypes": ["java.lang.foreign.MemorySegment", "java.lang.foreign.MemorySegment"]
+        }
+      ]
+    }
+  ],
+  "foreign": {
+    "downcalls": [
+      { "returnType": "jint", "parameterTypes": [] },
+      { "returnType": "jlong", "parameterTypes": ["void*"] },
+      { "returnType": "void", "parameterTypes": ["void*", "jlong", "jlong", "void*"] }
+    ],
+    "upcalls": [
+      { "returnType": "jint", "parameterTypes": ["void*", "void*"] }
+    ]
+  }
+}

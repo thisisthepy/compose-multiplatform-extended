@@ -26,6 +26,55 @@ the run needs nobody at the keyboard.
 Skia comes from `extended/skiko/build-skiko-static-jvm.sh` in
 compose-multiplatform-core-extended.
 
+## Native code through the FFM API
+
+An application that calls C through the Foreign Function and Memory API needs two things in
+the image, and `packageNativeImage` takes both as they are:
+
+- **The flag.** `nativeImage.buildArgs` is passed to native-image unchanged, after the
+  plugin's own arguments, so `buildArgs.add("--enable-native-access=ALL-UNNAMED")` is enough.
+  Put the same flag in `jvmArgs` as well: `runNativeImageAgent` passes the application's
+  `jvmArgs` to the run that collects its metadata. GraalVM 25 has FFM support on by default,
+  so no `-H:+ForeignAPISupport` is needed.
+- **The metadata.** The runtime classpath reaches native-image as the jars themselves, and
+  native-image reads every `META-INF/native-image/**/reachability-metadata.json` (and
+  `native-image.properties`) inside them. A library that registers its downcalls and upcalls
+  in its own jar's `foreign` section needs nothing from the application. The application's
+  own metadata in `src/main/native-image` is read as well; the two are merged by native-image.
+
+`hello-ffm/` is the check, run by the "One executable (GraalVM, <os>)" jobs: its dependency
+`ffm-lib` calls `getpid`, `strlen` and `qsort` with a Java comparator, and registers those
+shapes only in its jar. The application registers nothing for them, builds with the flag
+above, and prints `ffm check ok` when every call returned what it should with no warning about
+restricted methods.
+
+## Files beside the executable
+
+Some applications need a directory next to the executable at run time, such as an embedded
+Python's prefix (`PYTHONHOME`). `nativeImage.besideExecutable` names it as a copy spec:
+
+```kotlin
+nativeImage {
+    besideExecutable {
+        from("python/prefix") { into("python") }
+    }
+}
+```
+
+`stageNativeImage` then copies the executable and those files into
+`build/compose/native-image-staged/<app>`, and `packageApplication` makes that directory
+instead of the executable alone. The application finds the files from its own path,
+`ProcessHandle.current().info().command()`, as `hello-ffm` does.
+
+It is opt-in. An application that names nothing gets no staged directory, and
+`packageNativeImage`'s output is the one executable whether or not anything is staged; staging
+writes to its own directory and never into that one. The one-executable gate checks
+`packageNativeImage`'s output, so it treats an application that stages files the same way as
+any other: the executable still has to be one file naming only system libraries. The gate does
+not look at the staged directory, and it runs the executable alone, so an application that
+cannot start without its staged files needs its own run from the staged directory, as the
+`hello-ffm` steps do.
+
 ## What makes it one file
 
 A Compose desktop application reaches native code through JNI libraries a JVM opens as

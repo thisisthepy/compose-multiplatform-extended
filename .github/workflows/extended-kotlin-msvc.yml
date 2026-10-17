@@ -99,7 +99,8 @@ jobs:
           vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           root="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r' | sed 's|\\|/|g')"
           dumpbin="$(find "$root/VC/Tools/MSVC" -path '*/bin/Hostx64/x64/dumpbin.exe' | sort | tail -1)"
-          "$dumpbin" /nologo /dependents build/bin/mingwX64/releaseExecutable/hello.exe | tee dumpbin.log
+          # Git Bash would turn /nologo and /dependents into paths under its own root.
+          MSYS_NO_PATHCONV=1 "$dumpbin" /nologo /dependents build/bin/mingwX64/releaseExecutable/hello.exe | tee dumpbin.log
           # Only parts of Windows: no MinGW or Visual C++ runtime DLL beside the executable.
           ! grep -iE 'libstdc|libgcc|libwinpthread|vcruntime|msvcp' dumpbin.log
 

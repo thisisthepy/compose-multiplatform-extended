@@ -175,6 +175,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
                 Platform.WindowsX64 -> emptyList()
             }
             if (upcalls.isNotEmpty()) args += "--initialize-at-build-time=${upcalls.joinToString(",")}"
+            args += awtFreeArguments()
         }
         args += buildArgs.get()
         args += listOf("-o", output.resolve(imageName.get()).absolutePath, mainClass.get())
@@ -523,6 +524,41 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             )
             obj
         }
+    }
+
+    /**
+     * What keeps the Java toolkit out of an AWT-free image.
+     *
+     * skiko's `Setup.init` sets a Swing look and feel behind a run-time property, and the image
+     * analysis walks that branch whatever the property says, so `UIManager`, the toolkit and
+     * GraalVM's copies of `libawt*.so` come into the image with it. The core fork's skiko-awt
+     * (`extended/skiko/build-skiko-awt.sh`) puts the branch behind `AwtSwitch.available`, which
+     * is a constant once the class is initialised at build time with `-Dcompose.awt=false`.
+     *
+     * The toolkit and `Component` are also made forbidden types, so anything else that reaches
+     * AWT stops the build with the path that reached it, instead of an image that quietly carries
+     * AWT's libraries beside it.
+     */
+    private fun awtFreeArguments(): List<String> {
+        val switch = "org/jetbrains/skiko/AwtSwitch.class"
+        val hasSwitch = runtimeClasspath.files.any { file ->
+            file.isFile && file.name.endsWith(".jar") && ZipFile(file).use { it.getEntry(switch) != null }
+        }
+        if (!hasSwitch) {
+            throw GradleException(
+                "windowing = AwtFree needs skiko-awt with the AWT switch (org.jetbrains.skiko.AwtSwitch), and the runtime classpath's " +
+                    "skiko-awt has none, so the image would carry the Java toolkit. Publish it with " +
+                    "`extended/skiko/build-skiko-awt.sh <work-dir>` from compose-multiplatform-core-extended."
+            )
+        }
+        return listOf(
+            "-Dcompose.awt=false",
+            "--initialize-at-build-time=org.jetbrains.skiko.AwtSwitch",
+            "-H:+UnlockExperimentalVMOptions",
+            "-H:ReportAnalysisForbiddenType=java.awt.Toolkit",
+            "-H:ReportAnalysisForbiddenType=java.awt.Component",
+            "-H:-UnlockExperimentalVMOptions",
+        )
     }
 
     /**

@@ -116,13 +116,15 @@ jobs:
         include:
           - name: macos-arm64
             os: macos-26
-            nik: macos-aarch64
+            nik: vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64
           - name: linux-x64
             os: ubuntu-24.04
-            nik: linux-amd64
+            nik: vm-full-openjdk25.0.4.1+2-25.0.4.1+1-linux-amd64
+          # BellSoft publishes no Full NIK for Linux arm64. The Full edition only adds the JDK's
+          # static AWT archives, which an AWT-free image does not link.
           - name: linux-arm64
             os: ubuntu-24.04-arm
-            nik: linux-aarch64
+            nik: vm-openjdk25.0.4.1+2-25.0.4.1+1-linux-aarch64
           # Kotlin/Native packaging cells go here. Each one runs check-native-config.sh (already
           # scans extended/window/native) and, after linking, `nm` on the executable for
           # Objective-C or class-name lookups; see the K/N section of the plugin change list.
@@ -158,10 +160,10 @@ jobs:
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
             libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq
 
-      - name: Liberica NIK 25 Full
+      - name: Liberica NIK 25
         shell: bash
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-${{ matrix.nik }}.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_BASE/bellsoft-liberica-${{ matrix.nik }}.tar.gz"
           mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
           rel="$(find "$RUNNER_TEMP/nik" -name release -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
           home="$(dirname "$rel")"
@@ -202,6 +204,13 @@ jobs:
           ./kotlin publish mavenLocal
           cp project.yaml.all project.yaml
           find ~/.m2/repository/org/thisisthepy/compose/window -name '*.pom' | sort
+
+      # skiko-awt with the AWT switch, under the version Compose asks for, so the AWT-free images
+      # resolve it from mavenLocal. Without it skiko's look-and-feel branch keeps the Java toolkit
+      # in the image, and packageNativeImage refuses an AWT-free build.
+      - name: skiko-awt with the AWT switch to mavenLocal
+        shell: bash
+        run: bash core-extended/extended/skiko/build-skiko-awt.sh "$RUNNER_TEMP/skiko-awt"
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins

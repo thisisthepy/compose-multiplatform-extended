@@ -4,12 +4,12 @@
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1-extended-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 
 dependencies {
     implementation(compose.desktop.currentOs)
-    implementation("org.jetbrains.compose.material3:material3:1.9.0")
+    implementation("org.thisisthepy.compose.material3:material3:1.11.0-alpha07-ext.1")
 }
 
 compose.desktop.application {

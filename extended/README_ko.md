@@ -31,16 +31,22 @@ AWT 없이 만들기 때문에 애플리케이션이 쓰지 않는 것은 실행
 
 ## 설치
 
-아직 공개 저장소에 없습니다. 플러그인을 로컬 Maven 저장소에 게시하고, `mavenLocal()` 을 Gradle Plugin Portal 보다 앞에 둡니다.
+아직 공개 저장소에 없습니다. core 포크의 Compose 를, 그다음 플러그인을 로컬 Maven 저장소에 게시하고,
+`mavenLocal()` 을 Gradle Plugin Portal 보다 앞에 둡니다.
 
 ```sh
+# compose-multiplatform-core-extended 의 extended 브랜치 체크아웃에서
+extended/compose/publish-local.sh desktop      # 또는 macosArm64, linuxX64, linuxArm64
+
+# 이 저장소에서
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
+    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
 ```
 
-`settings.gradle.kts` 와 `build.gradle.kts` 는 영어 README 의 Install 절과 같습니다. 플러그인은 당분간
-JetBrains 의 ID 를 그대로 씁니다. `org.thisisthepy.compose` 로 바꾸는 일은 계획입니다.
+`settings.gradle.kts` 와 `build.gradle.kts` 는 영어 README 의 Install 절과 같습니다. 플러그인 ID 는
+`org.thisisthepy.compose` 입니다. 이 포크 자신의 ID 라서 JetBrains 의 `org.jetbrains.compose` 옆에 두어도
+어느 쪽도 다른 쪽을 대신하지 않습니다.
 
 ## 출하하는 세 가지 방법
 
@@ -55,11 +61,10 @@ JetBrains 의 ID 를 그대로 씁니다. `org.thisisthepy.compose` 로 바꾸�
 
 ### 플러그인 ID
 
-지금 `extended` 에는 플러그인이 하나 있고, JetBrains 의 ID `org.jetbrains.compose` 를 그대로 씁니다
-(`gradle-plugins/compose/build.gradle.kts`). 위 세 출력과 명령줄 출력을 모두 이 플러그인이 맡습니다. 이 포크
-자신의 ID 둘은 계획이며, 어느 것도 아직 `extended` 에 없습니다.
+이 포크는 자신의 플러그인 ID 를 둘 가집니다. 소유자, 2026-10-05: Compose 애플리케이션용 하나, 명령줄
+프로그램용 하나.
 
-- **Compose 데스크톱**, `org.thisisthepy.compose`: Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다. 창이 있는 Kotlin/Native 앱은 패키징합니다. **상태: 계획.** [`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates) 브랜치에 있습니다([Gradle 플러그인](#gradle-플러그인) 참고).
+- **Compose 데스크톱**, `org.thisisthepy.compose` (`gradle-plugins/compose/build.gradle.kts`): Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다. 창이 있는 Kotlin/Native 앱은 패키징합니다. 명령줄 출력도 맡습니다([Gradle 플러그인](#gradle-플러그인) 참고).
 - **명령줄 프로그램용 Kotlin/Native 데스크톱**, `org.thisisthepy.kotlin.native.desktop`: Compose 도 창도 없습니다. **상태: 열림.** [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31) 에 있습니다. ID 는 Kotlin 빌드 도구의 이름 규칙을 따릅니다
   (`org.jetbrains.kotlin.native.cocoapods` 는 `org.thisisthepy.kotlin.native.<feature>` 에 대응합니다). 소유자, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
 
@@ -186,7 +191,7 @@ dependencyResolutionManagement {
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.jetbrains.compose") version "1.11.1-extended-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 
 dependencies {
@@ -233,49 +238,34 @@ compose.desktop.application {
 
 ## Gradle 플러그인
 
-### 지금: org.jetbrains.compose
-
-`extended` 에서 플러그인은 JetBrains 의 ID 와 좌표를 그대로 씁니다. 그래서 Gradle Plugin Portal 보다
-로컬 Maven 저장소에서 먼저 가져와야 합니다 (위의 `settings.gradle.kts`).
-
-- 플러그인 ID: `org.jetbrains.compose` (`gradle-plugins/compose/build.gradle.kts`)
-- 아티팩트: `org.jetbrains.compose:compose-gradle-plugin`
-- 버전: `-Pdeploy.version` 으로 준 값입니다. `gradle-plugins/gradle.properties` 의 기본값은
-  `9999.0.0-SNAPSHOT` 입니다. probe 와 `hello` 예제는 `1.11.1-extended-dev` 를 씁니다.
-
-probe 워크플로와 같은 방법으로 로컬 저장소에 배포합니다.
-
-```sh
-cd gradle-plugins
-./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-extended-dev -Pcompose.version=1.11.1
-```
-
-`-Pcompose.version` 은 플러그인의 별칭 (`compose.desktop.currentOs` 등) 이 가리키는 Compose
-버전입니다. core 포크는 기본으로 JetBrains 의 `org.jetbrains.compose.*` 그룹 아래 `1.11.1` 로 라이브러리를
-배포하므로, `1.11.1` 이면 그것을 가져옵니다. 사용하는 쪽은 다른 버전으로 배포할 수 있습니다. compose-rust 는
-자신이 바꾸는 데스크톱과 macOS 모듈을 `1.11.1001` 로, skiko-awt 를 `0.144.6.1` 로 배포하고, 그 버전을 이름으로
-요청합니다(core 포크의 [Maven 좌표](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README_ko.md#maven-좌표) 참고).
-아직 공개 저장소에 올린 것은 없습니다.
-
-### 계획: org.thisisthepy.compose
-
-**상태: 계획.**
-[`chore/thisisthepy-coordinates`](https://github.com/thisisthepy/compose-multiplatform-extended/tree/chore/thisisthepy-coordinates)
-브랜치는 플러그인을 이 포크 자신의 이름으로 배포합니다. JetBrains 의 `org.jetbrains.compose` 옆에 두어도
-어느 한쪽이 다른 쪽을 대체하지 않게 하기 위해서입니다. 구현 클래스와 `compose { }` DSL 은 JetBrains 것
-그대로입니다.
+플러그인은 이 포크 자신의 이름으로 배포합니다. JetBrains 의 `org.jetbrains.compose` 옆에 두어도 어느 한쪽이
+다른 쪽을 대체하지 않게 하기 위해서입니다. 구현 클래스와 `compose { }` DSL 은 JetBrains 것 그대로라서,
+기존 빌드는 `plugins { }` 줄만 바꿉니다.
 
 - 플러그인 ID: `org.thisisthepy.compose` (마커
   `org.thisisthepy.compose:org.thisisthepy.compose.gradle.plugin`)
 - 아티팩트: `org.thisisthepy.compose:compose-gradle-plugin`
-- 버전: `<upstream version>-ext.<N>`. 예: `1.11.1-ext.1`. 로컬 빌드는 `-ext.<N>-dev`
-- 별칭은 compose-multiplatform-core-extended 의 `org.thisisthepy.compose.*` 라이브러리를 가리킵니다
+- 버전: `<upstream version>-ext.<N>`. 기본값은 `1.11.1-ext.1` 입니다(`gradle-plugins/gradle.properties`).
+  로컬 빌드는 `-ext.<N>-dev` 이고, probe 와 예제는 `1.11.1-ext.1-dev` 를 씁니다.
+- 별칭(`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` 등)은
+  compose-multiplatform-core-extended 의 `org.thisisthepy.compose.*` 라이브러리를 `-Pcompose.version`
+  (`1.11.1-ext.1`)과 `-Pcompose.material3.version`(`1.11.0-alpha07-ext.1`)으로 가리킵니다.
+  `compose("org.jetbrains.compose.ui:ui")` 도 포크의 좌표로 바뀝니다.
+- components 와 Compose HTML 은 JetBrains 것을 업스트림 버전(`1.11.1`)으로 씁니다. core 포크가
+  빌드하지 않기 때문입니다.
 
-이 변경이 들어오면 `plugins { }` 줄은 다음과 같아집니다.
+```sh
+cd gradle-plugins
+./gradlew --no-daemon :compose:publishToMavenLocal \
+    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
+```
 
 ```kotlin
 plugins {
     id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
 }
 ```
+
+별칭이 가리키는 라이브러리는 아직 공개 저장소에 없습니다. 먼저 core 포크에서 배포합니다
+(`extended/compose/publish-local.sh`, core 포크의
+[Maven 좌표](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README_ko.md#maven-좌표) 참고).

@@ -1,11 +1,11 @@
 plugins {
     id 'org.jetbrains.kotlin.jvm'
     id 'org.jetbrains.kotlin.plugin.compose'
-    id 'org.jetbrains.compose'
+    id 'org.thisisthepy.compose'
 }
 
 dependencies {
     implementation 'org.jetbrains.kotlin:kotlin-stdlib'
-    api "org.jetbrains.compose.ui:ui-tooling:COMPOSE_VERSION_PLACEHOLDER"
+    api "org.thisisthepy.compose.ui:ui-tooling:COMPOSE_VERSION_PLACEHOLDER"
     implementation compose.desktop.currentOs
 }

@@ -31,21 +31,24 @@ class RuntimeLibrariesCompatibilityCheckTest : GradlePluginTestBase() {
         }
         checkMainTargetsCompatibility(logMsg, warningExpected = false)
 
+        // The fork has published no other version to mismatch with, so the mismatch here is
+        // the one that matters in practice: JetBrains' build of the same library next to the
+        // plugin's, which is a second copy of the same classes whatever its version.
         file("build.gradle.kts").modify {
             it.replace(
-                "api(\"org.jetbrains.compose.ui:ui:${defaultTestEnvironment.composeVersion}\")",
+                "api(\"org.thisisthepy.compose.ui:ui:${defaultTestEnvironment.composeVersion}\")",
                 "api(\"org.jetbrains.compose.ui:ui:1.9.3\")"
             ).replace(
-                "api(\"org.jetbrains.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")",
+                "api(\"org.thisisthepy.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")",
                 "api(\"org.jetbrains.compose.foundation:foundation:1.9.3\")"
             )
         }
         val msg = buildString {
             appendLine("w: Compose Multiplatform runtime dependencies' versions don't match with plugin version.")
-            appendLine("    expected: 'org.jetbrains.compose.ui:ui:${defaultTestEnvironment.composeVersion}'")
+            appendLine("    expected: 'org.thisisthepy.compose.ui:ui:${defaultTestEnvironment.composeVersion}'")
             appendLine("    actual:   'org.jetbrains.compose.ui:ui:1.9.3'")
             appendLine("")
-            appendLine("    expected: 'org.jetbrains.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}'")
+            appendLine("    expected: 'org.thisisthepy.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}'")
             appendLine("    actual:   'org.jetbrains.compose.foundation:foundation:1.9.3'")
         }
         checkMainTargetsCompatibility(msg, warningExpected = true)
@@ -71,8 +74,8 @@ class RuntimeLibrariesCompatibilityCheckTest : GradlePluginTestBase() {
         // In case of dependency to old compose:ui without skiko explicitly, no warning should be emitted.
         file("build.gradle.kts").modify {
             it.replace(
-                "api(\"org.jetbrains.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")",
-                "api(\"org.jetbrains.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")\n" +
+                "api(\"org.thisisthepy.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")",
+                "api(\"org.thisisthepy.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")\n" +
                         "            implementation(\"$OLD_COMPOSE_DEPENDENCY\")",
             )
         }
@@ -98,8 +101,8 @@ class RuntimeLibrariesCompatibilityCheckTest : GradlePluginTestBase() {
         val logMsg = "w: Skiko dependencies' versions are incompatible."
         file("build.gradle.kts").modify {
             it.replace(
-                "api(\"org.jetbrains.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")",
-                "api(\"org.jetbrains.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")\n" +
+                "api(\"org.thisisthepy.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")",
+                "api(\"org.thisisthepy.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}\")\n" +
                         "            implementation(\"$OLD_SKIKO_DEPENDENCY\")",
             )
         }

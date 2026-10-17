@@ -286,7 +286,22 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a timeout 120 ./app | tee out.txt
           else
-            perl -e 'alarm 120; exec @ARGV' ./app | tee out.txt
+            # It has hung here on the macOS runner (runs 39029929261 and 39034223682). If it
+            # does, the stacks of every thread are printed before it is stopped, so the hang
+            # says where it is.
+            ./app > out.txt 2>&1 &
+            pid=$!
+            for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "the link sample is still running after 120 s; its threads:" >&2
+              sample "$pid" 3 -file "$single/hang.txt" >/dev/null 2>&1 || true
+              cat "$single/hang.txt" >&2 || true
+              kill -9 "$pid" || true
+              cat out.txt
+              exit 1
+            fi
+            wait "$pid"
+            cat out.txt
           fi
           grep -q "link check ok" out.txt
 

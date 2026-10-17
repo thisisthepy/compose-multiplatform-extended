@@ -284,6 +284,34 @@ else
 fi
 kill "$server" 2>/dev/null || true
 
+# A later host that adds a target is fine; one whose root module differs stops staging. The
+# plugin's group can be left out.
+a="$work/h1-repo"; b="$work/h2-repo"; out="$work/h-out"; rm -rf "$a" "$b" "$out"
+make_repo "$a"; make_repo "$b"
+d="$b/org/thisisthepy/compose/ui/ui-mingwx64/$V"; mkdir -p "$d"
+pom "$d/ui-mingwx64-$V.pom" org.thisisthepy.compose.ui ui-mingwx64 "$V" klib
+echo klib > "$d/ui-mingwx64-$V.klib"
+if python3 -I "$tool" stage --from "$a" --from "$b" --out "$out" --exclude-group org.thisisthepy.compose > "$work/log" &&
+    [[ -f "$out/org/thisisthepy/compose/ui/ui-mingwx64/$V/ui-mingwx64-$V.klib" ]]; then
+    pass "a later host adds the targets it builds"
+else
+    fail "a later host's targets"; cat "$work/log" >&2
+fi
+[[ ! -e "$out/org/thisisthepy/compose/compose-gradle-plugin" && -e "$out/org/thisisthepy/compose/ui" ]] &&
+    pass "an excluded group is left out, and only that group" || fail "--exclude-group"
+python3 -I - "$b/org/thisisthepy/compose/ui/ui/$V/ui-$V.module" <<'PY2'
+import json, sys
+m = json.load(open(sys.argv[1])); m["variants"] = m["variants"][:1]
+json.dump(m, open(sys.argv[1], "w"))
+PY2
+rm -rf "$out"
+if python3 -I "$tool" stage --from "$a" --from "$b" --out "$out" > "$work/log" 2>&1; then
+    fail "a root that differs between hosts was staged"
+else
+    grep -q "ui-$V.module: .* has another copy" "$work/log" && pass "a root that differs between hosts stops staging" ||
+        { fail "differing root message"; cat "$work/log" >&2; }
+fi
+
 if [[ $failures -gt 0 ]]; then
     echo "$failures failure(s)" >&2
     exit 1

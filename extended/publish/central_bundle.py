@@ -3,7 +3,7 @@
 
 Usage:
   central_bundle.py stage    --from <repo> [--from <repo>...] --out <dir> [--project <owner/repo>]
-                             [--dev-suffix=<-dev.sha>]
+                             [--dev-suffix=<-dev.sha>] [--exclude-group <group>...]
   central_bundle.py sign     <dir> [--key <id>] [--checksums-only]
   central_bundle.py validate <dir> [--version <v> | --dev=<-dev.sha>] [--require <group:artifact>...]
                                    [--verify-signatures | --unsigned]
@@ -15,10 +15,15 @@ build); this tool only reads the Maven repositories they wrote to. It is the sam
 thisisthepy/compose-multiplatform-core-extended and thisisthepy/compose-multiplatform-extended,
 and a change to one is made to the other.
 
-stage    copies every component under org/thisisthepy from each repository into <dir>. When
-         two repositories hold the same file with different content, the one named first
-         wins and the other is reported: the macOS build is named first because its root
-         modules list every target. Then each POM gets what Central asks for and a local
+stage    copies every component under org/thisisthepy from each repository into <dir>, except
+         those whose group is exactly an --exclude-group (the core fork leaves the plugin,
+         group org.thisisthepy.compose, to the plugin repository's own release). The first
+         repository is the one that publishes every Kotlin Multiplatform root (the macOS host,
+         whose metadata jar covers every target's shared source sets); a later repository may
+         add a component or a file, but a Gradle module (.module) that differs from the first
+         one's stops staging, because a root built on another host lists other targets and
+         carries other metadata. Any other file two repositories hold with different content
+         comes from the one named first, and the other is reported. Then each POM gets what Central asks for and a local
          build does not always write (name, description, url, licenses, developers, scm);
          url and scm always name the repository the artifacts are built from, since that is
          where their sources are. A component that is not a bare POM gets an empty javadoc
@@ -122,28 +127,36 @@ def primary_files(directory):
 
 # --- stage -------------------------------------------------------------------------------
 
-def stage(sources, out, project, dev_suffix=None):
+def stage(sources, out, project, dev_suffix=None, excluded=()):
     os.makedirs(out, exist_ok=True)
     conflicts = []
+    roots = []
     for source in sources:
         base = os.path.join(source, *PREFIX.split("."))
         if not os.path.isdir(base):
             print(f"note  {source} holds nothing under {PREFIX}")
             continue
         for group, artifact, version, directory in components(source):
-            if not group.startswith(PREFIX):
+            if not group.startswith(PREFIX) or group in excluded:
                 continue
             target = os.path.join(out, os.path.relpath(directory, source))
             os.makedirs(target, exist_ok=True)
             for name in primary_files(directory):
                 src, dst = os.path.join(directory, name), os.path.join(target, name)
                 if os.path.exists(dst):
+                    if name.endswith(".module") and not filecmp.cmp(src, dst, shallow=False):
+                        roots.append(f"{os.path.relpath(dst, out)}: {source} has another copy")
+                        continue
                     if not filecmp.cmp(src, dst, shallow=False):
                         conflicts.append(f"{os.path.relpath(dst, out)}: kept the copy from an earlier --from, not {source}")
                     continue
                 shutil.copy2(src, dst)
     for line in conflicts:
         print(f"note  {line}")
+    if roots:
+        for line in roots:
+            print(f"FAIL  {line}")
+        sys.exit(f"error: {len(roots)} Gradle module(s) differ between hosts; only the first repository may publish them")
     prune_unbuilt(out)
     if dev_suffix:
         rename_versions(out, dev_suffix)
@@ -623,6 +636,7 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--project", default="thisisthepy/compose-multiplatform-core-extended")
     p.add_argument("--dev-suffix")
+    p.add_argument("--exclude-group", action="append", default=[])
     p = commands.add_parser("sign")
     p.add_argument("dir")
     p.add_argument("--key")
@@ -642,7 +656,7 @@ def main():
     p.add_argument("url")
     args = parser.parse_args()
     if args.command == "stage":
-        stage([os.path.expanduser(s) for s in args.sources], args.out, args.project, args.dev_suffix)
+        stage([os.path.expanduser(s) for s in args.sources], args.out, args.project, args.dev_suffix, set(args.exclude_group))
     elif args.command == "sign":
         sign(args.dir, args.key, args.checksums_only)
     elif args.command == "validate":

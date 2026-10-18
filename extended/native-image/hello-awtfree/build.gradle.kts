@@ -40,11 +40,6 @@ compose.desktop.application {
         // CORE_EXTENDED: a checkout of compose-multiplatform-core-extended; SKIKO_STATIC: the
         // build-skiko-static-jvm.sh --no-jawt output.
         providers.environmentVariable("CORE_EXTENDED").orNull?.let { windowSourcesDirectory.set(file(it)) }
-        // AppKit calls have to come from the process's first thread; GraalVM's launcher runs
-        // main on a new one on macOS unless told not to.
-        // The option is experimental, so it is unlocked first: the run that hung (39082357989) had
-        // main in JavaMainWrapper.doRunInNewThread with the option given while locked.
-        if (macos) buildArgs.addAll("-H:+UnlockExperimentalVMOptions", "-H:-RunMainInNewThread")
         // The sample's text is Korean; the image keeps the locale data it needs.
         buildArgs.add("-H:IncludeLocales=en,ko")
         // NATIVE_IMAGE_CALL_TREE set: the analysis call tree is written to the reports folder, to

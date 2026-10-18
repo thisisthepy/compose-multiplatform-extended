@@ -189,4 +189,41 @@ if grep -E '^(java|kotlin|org)\.[A-Za-z0-9_.$]*(Exception|Error)\b' "$log"; then
 fi
 [[ "$status" -eq 0 ]] || fail "the executable did not run to the end on its own (exit $status)"
 
+# 5. A native image carries its own runtime, so running it must not look for a Java one: no file
+# under a JDK or GraalVM, no module image, no jvm.cfg, no libjvm or libjava loaded. Run once more,
+# alone, watched: every file access on Linux (strace), every library loaded on macOS (dyld).
+runtime_log="$scratch/runtime.log"
+case "$os" in
+    linux)
+        command -v strace > /dev/null || fail "strace is not installed" "It is how the run is watched for a Java runtime."
+        ( cd "$scratch/run" && HELLO_SELF_CHECK="$scratch/again.png" timeout 120 \
+            strace -f -qq -e trace=file -o "$runtime_log" "./$name" ) > /dev/null 2>&1 || true
+        accessed="$(sed -n 's/.*"\(\/[^"]*\)".*/\1/p' "$runtime_log" | sort -u)"
+        ;;
+    macos)
+        ( cd "$scratch/run" && HELLO_SELF_CHECK="$scratch/again.png" DYLD_PRINT_LIBRARIES=1 \
+            perl -e 'alarm 120; exec @ARGV' "./$name" ) > "$runtime_log" 2>&1 || true
+        accessed="$(sed -n 's/^dyld\[[0-9]*\]: <[^>]*> //p; s/^dyld\[[0-9]*\]: //p' "$runtime_log" | awk '{print $1}' | sort -u)"
+        ;;
+    windows) accessed="" ;;
+esac
+[[ "$os" == windows || -n "$accessed" ]] || fail "watching the run recorded nothing, so it proves nothing" "$(tail -5 "$runtime_log")"
+java_paths=()
+for home in "${GRAALVM_HOME:-}" "${JAVA_HOME:-}"; do [[ -n "$home" ]] && java_paths+=("$home"); done
+found=""
+while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    case "$path" in
+        */lib/modules|*/jvm.cfg|*/libjvm.*|*/libjava.*|*/conf/security/java.security) found+="$path"$'\n'; continue ;;
+    esac
+    for home in "${java_paths[@]+"${java_paths[@]}"}"; do
+        [[ "$path" == "$home"/* ]] && found+="$path"$'\n'
+    done
+    if [[ "$os" == macos ]]; then
+        case "$path" in /usr/lib/*|/System/*) ;; *) [[ "$path" == "$scratch/run/$name" ]] || found+="$path (a library outside the system)"$'\n' ;; esac
+    fi
+done <<< "$accessed"
+[[ -z "$found" ]] || fail "running the executable looked for a Java runtime or a library of its own" $found
+echo "-- run watched ($( [[ "$os" == macos ]] && echo "every library loaded" || echo "every file accessed")): $(wc -l <<< "$accessed" | tr -d ' ') paths, none in a Java runtime"
+
 echo "ok    $name is one executable: system libraries only, Korean laid out with no ICU data file"

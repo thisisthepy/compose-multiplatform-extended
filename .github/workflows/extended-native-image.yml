@@ -253,7 +253,7 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends \
             build-essential pkg-config xvfb xauth libgl1-mesa-dev libegl-dev libgl1-mesa-dri \
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
-            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb
+            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb strace
 
       - name: GraalVM 25 (Liberica NIK, or upstream where the cell names it)
         shell: bash
@@ -430,6 +430,19 @@ jobs:
           else
             bash extended/native-image/check-one-executable.sh "$out" "$RUNNER_TEMP/one-executable"
           fi
+      # Said here rather than left out: an application built from source with this plugin needs a
+      # JDK on the machine that builds it, because Gradle, the Kotlin compiler and native-image
+      # all run on one. Needing nothing but the platform's linker holds only where the renderer
+      # arrives already built, as compose-rust's does (its build script downloads it); it cannot
+      # hold for this build, so this gate does not check it.
+      - name: What this gate does not check, and why
+        shell: bash
+        run: |
+          echo "The executable checked above needs no Java runtime to run. Building it did need one:"
+          echo "  java: $(java -version 2>&1 | head -1)"
+          echo "  native-image: $("$GRAALVM_HOME/bin/native-image" --version 2>&1 | head -1)"
+          echo "A build that needs only the platform's linker is one whose renderer arrives prebuilt."
+
       - name: Keep the self-check drawing
         if: always()
         uses: actions/upload-artifact@v4

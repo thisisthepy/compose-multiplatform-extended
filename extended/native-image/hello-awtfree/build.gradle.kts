@@ -23,6 +23,8 @@ dependencies {
     // The scene host, and the core fork's foundation the content is written with.
     implementation("org.thisisthepy.compose.window:scene:0.1.0")
     implementation(compose.foundation)
+    // @CFunction, to ask the system which thread main runs on.
+    compileOnly("org.graalvm.sdk:nativeimage:25.0.1")
     // skiko for this system, and Compose UI for the desktop.
     implementation(compose.desktop.currentOs)
     // skiko-awt with the AWT switch, from compose-multiplatform-core-extended's
@@ -40,7 +42,9 @@ compose.desktop.application {
         providers.environmentVariable("CORE_EXTENDED").orNull?.let { windowSourcesDirectory.set(file(it)) }
         // AppKit calls have to come from the process's first thread; GraalVM's launcher runs
         // main on a new one on macOS unless told not to.
-        if (macos) buildArgs.add("-H:-RunMainInNewThread")
+        // The option is experimental, so it is unlocked first: the run that hung (39082357989) had
+        // main in JavaMainWrapper.doRunInNewThread with the option given while locked.
+        if (macos) buildArgs.addAll("-H:+UnlockExperimentalVMOptions", "-H:-RunMainInNewThread")
         // The sample's text is Korean; the image keeps the locale data it needs.
         buildArgs.add("-H:IncludeLocales=en,ko")
         // NATIVE_IMAGE_CALL_TREE set: the analysis call tree is written to the reports folder, to

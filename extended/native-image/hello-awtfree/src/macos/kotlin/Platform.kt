@@ -1,5 +1,6 @@
 package awtfree
 
+import org.graalvm.nativeimage.c.function.CFunction
 import org.thisisthepy.compose.window.WindowPlatform
 import org.thisisthepy.compose.window.graalvm.macos.AppKitWindowPlatform
 import org.thisisthepy.compose.window.graalvm.macos.appKitWindowSurface
@@ -14,3 +15,15 @@ internal fun newSurface(platform: WindowPlatform): WindowSurface? {
     installApplicationMenu("hello-awtfree")
     return appKitWindowSurface(platform)
 }
+
+/** Nonzero on the process's first thread, the only one AppKit takes calls from. */
+@CFunction("pthread_main_np")
+private external fun pthreadMainNp(): Int
+
+/**
+ * Whether main runs on the process's first thread. The AppKit window hands its calls to that
+ * thread when it is called from another, and that thread has to be serving them; a native image
+ * that ran main on a new thread leaves it waiting for main to end, and the first such call waits
+ * forever.
+ */
+internal fun onFirstThread(): Boolean = pthreadMainNp() != 0

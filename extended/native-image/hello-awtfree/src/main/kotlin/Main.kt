@@ -85,6 +85,10 @@ fun main() {
         ok = textSelfCheck() && drawSample(File(check))
     }
 
+    if (!onFirstThread()) {
+        System.err.println("self-check: main is not on the process's first thread, which the window's calls need")
+        exitProcess(3)
+    }
     val host = ComposeWindowHost(
         platform = newPlatform(),
         config = WindowConfig("안녕하세요, AwtFree", 520, 360, minWidth = 240, minHeight = 160),

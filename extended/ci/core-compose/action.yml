@@ -17,12 +17,26 @@ inputs:
 runs:
   using: composite
   steps:
+    # Keyed by what the Compose build reads, not by the commit: the whole tree except extended/
+    # and .github/ (the fork's own modules and CI), plus the publishing script, as the core
+    # fork's own fork-compose action keys it. A commit that only changes the window modules
+    # then reuses the Compose already built, which for macosArm64 takes hours. Trees only are
+    # fetched, so working the key out costs seconds.
     - name: Cache key
       id: key
       shell: bash
       run: |
+        set -euo pipefail
         targets="$(echo '${{ inputs.targets }}' | tr ' ' '\n' | sort | paste -sd- -)"
-        echo "key=core-compose-${{ runner.os }}-${{ runner.arch }}-$targets-${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+        probe="$RUNNER_TEMP/core-compose-key"
+        rm -rf "$probe"
+        git init -q "$probe"
+        git -C "$probe" fetch -q --depth=1 --filter=blob:none \
+          https://github.com/thisisthepy/compose-multiplatform-core-extended.git '${{ inputs.ref }}'
+        sources="$(git -C "$probe" ls-tree FETCH_HEAD | awk -F'\t' '$2 != "extended" && $2 != ".github" { print }' | git -C "$probe" hash-object --stdin)"
+        script="$(git -C "$probe" rev-parse FETCH_HEAD:extended/compose)"
+        rm -rf "$probe"
+        echo "key=core-compose-${{ runner.os }}-${{ runner.arch }}-$targets-$sources-$script" >> "$GITHUB_OUTPUT"
 
     - name: Restore the core fork's Compose
       id: restore

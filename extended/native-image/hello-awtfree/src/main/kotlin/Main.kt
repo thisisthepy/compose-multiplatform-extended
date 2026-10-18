@@ -1,68 +1,13 @@
 package awtfree
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import java.io.File
 import kotlin.system.exitProcess
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Surface
+import org.thisisthepy.compose.window.TitleBarStyle
 import org.thisisthepy.compose.window.WindowConfig
 import org.thisisthepy.compose.window.scene.ComposeWindowHost
-
-/**
- * Text, a field and a control that changes when it is clicked. Text needs a font manager, a
- * shaper and a layout pass, the field needs the platform's text input, and the control shows
- * that pointer input reaches the scene.
- */
-@Composable
-fun Content() {
-    var clicks by remember { mutableStateOf(0) }
-    var typed by remember { mutableStateOf("") }
-    Box(Modifier.fillMaxSize().background(Color(0xFF12321A))) {
-        Column(Modifier.padding(top = 32.dp, start = 24.dp)) {
-            BasicText("안녕하세요, no AWT here", style = TextStyle(color = Color.White, fontSize = 24.sp))
-            BasicText(
-                "composed by Compose, painted by Skia, shown by a window of our own",
-                style = TextStyle(color = Color(0xFF9CCC9C), fontSize = 14.sp),
-            )
-            BasicTextField(
-                value = typed,
-                onValueChange = { typed = it },
-                modifier = Modifier.padding(top = 16.dp).size(260.dp, 32.dp).background(Color(0xFF1E4620)),
-                textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
-                cursorBrush = SolidColor(Color.White),
-            )
-            Box(
-                Modifier.padding(top = 24.dp).size(220.dp, 56.dp).background(Color(0xFF2E7D32)).clickable { clicks++ },
-            ) {
-                BasicText(
-                    if (clicks == 0) "click me" else "clicked $clicks",
-                    Modifier.padding(16.dp),
-                    style = TextStyle(color = Color.White, fontSize = 18.sp),
-                )
-            }
-        }
-    }
-}
 
 /**
  * A Compose application with no AWT in it: the window is the core fork's GraalVM window, the
@@ -75,8 +20,11 @@ fun Content() {
  *    ([textSelfCheck]), with no ICU data file on the machine;
  * 2. the sample text inks pixels, drawn into a raster surface and written to the PNG;
  * 3. the window opens and presents frames of the Compose content, each drawn at the size the
- *    window had when it was presented.
- * The exit status is 0 only when all three hold.
+ *    window had when it was presented;
+ * 4. the platform's checks of the running window pass: on macOS, the title bar the
+ *    configuration asked for, and the field and the button with their names where a screen
+ *    reader looks.
+ * The exit status is 0 only when all four hold.
  */
 fun main() {
     val check = System.getenv("HELLO_SELF_CHECK")
@@ -89,9 +37,13 @@ fun main() {
         System.err.println("self-check: main is not on the process's first thread, which the window's calls need")
         exitProcess(3)
     }
+    // HELLO_TITLE_BAR=Simple opens the window with the plain title bar; the default is Normal.
+    val titleBar = if (System.getenv("HELLO_TITLE_BAR") == "Simple") TitleBarStyle.Simple else TitleBarStyle.Normal
+    val platform = newPlatform()
+    val config = WindowConfig("안녕하세요, AwtFree", 520, 360, minWidth = 240, minHeight = 160, titleBar = titleBar)
     val host = ComposeWindowHost(
-        platform = newPlatform(),
-        config = WindowConfig("안녕하세요, AwtFree", 520, 360, minWidth = 240, minHeight = 160),
+        platform = platform,
+        config = config,
         surfaceFor = ::newSurface,
         content = { Content() },
     )
@@ -111,6 +63,9 @@ fun main() {
             host.requestFrame()
             host.turn(16)
         }
+        // 4. What the platform's own checks say about the running window: on macOS the title
+        // bar and what a screen reader is told (platformChecks in Platform.kt).
+        if (!host.closed && !platformChecks(host, platform, config)) ok = false
     } finally {
         host.close()
     }

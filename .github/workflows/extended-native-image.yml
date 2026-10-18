@@ -206,7 +206,12 @@ jobs:
         include:
           - name: macos-arm64
             os: macos-26
-            nik: vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64
+            # Upstream GraalVM, not Liberica NIK: NIK 25.0.4.1 runs main on a new thread on macOS
+            # whatever -H:-RunMainInNewThread says (run 39084384117: pthread_main_np is 0 in
+            # main), and the AppKit window then waits forever for the first thread, which is
+            # joining main. The AWT-free samples need nothing of NIK's; its static AWT
+            # libraries are for AWT images.
+            graalvm: https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-25.0.1/graalvm-community-jdk-25.0.1_macos-aarch64_bin.tar.gz
           - name: linux-x64
             os: ubuntu-24.04
             nik: vm-full-openjdk25.0.4.1+2-25.0.4.1+1-linux-amd64
@@ -250,10 +255,12 @@ jobs:
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
             libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb
 
-      - name: Liberica NIK 25
+      - name: GraalVM 25 (Liberica NIK, or upstream where the cell names it)
         shell: bash
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_BASE/bellsoft-liberica-${{ matrix.nik }}.tar.gz"
+          url="${{ matrix.graalvm }}"
+          [ -n "$url" ] || url="$NIK_BASE/bellsoft-liberica-${{ matrix.nik }}.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$url"
           mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
           rel="$(find "$RUNNER_TEMP/nik" -name release -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
           home="$(dirname "$rel")"

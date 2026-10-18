@@ -127,6 +127,16 @@ What it took, all in `windowsLink` and the static skiko archive:
 - Skia's ICU data is compiled into the skiko archive, since Skia otherwise looks for
   `icudtl.dat` beside the executable.
 
+## Which GraalVM
+
+An application with `windowing = Awt` needs Liberica NIK Full, the one distribution that ships the
+JDK's static AWT libraries. An AWT-free application on macOS needs a GraalVM that runs `main` on
+the process's first thread when told `-H:-RunMainInNewThread`: the AppKit window hands its calls
+to that thread, which has to be serving them. Liberica NIK 25.0.4.1 runs `main` on a new thread
+on macOS whatever the option says, and the first call that crosses waits forever; upstream
+GraalVM honours it. The gate builds the AWT-free samples on macOS with upstream GraalVM 25.0.1,
+and `hello-awtfree` exits with a message rather than hanging when `main` is on another thread.
+
 ## The one-executable gate
 
 `check-one-executable.sh` is what the "One executable (GraalVM, <os>)" jobs in

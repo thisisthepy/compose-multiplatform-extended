@@ -147,9 +147,14 @@ Kotlin/Native `.app` 은 `signDistributableNative...` 가 서명합니다. `nati
 
 ### 요구 사항
 
-- **GraalVM: Liberica NIK 25 Full.** 이미지는 JDK 의 AWT 를 정적으로 링크하는데, 그럴 수 있는 것은
-  JDK 의 정적 아카이브를 함께 배포하는 배포판뿐입니다. 아카이브가 없으면 태스크가 이 이유를 말하고
-  멈춥니다. NIK 25.0.4.1 로 측정했습니다.
+- **GraalVM 은 windowing 에 따라 다릅니다.** `windowing = Awt` 는 Liberica NIK 25 Full 이 필요합니다.
+  이미지는 JDK 의 AWT 를 정적으로 링크하는데, 그럴 수 있는 것은 JDK 의 정적 아카이브를 함께 배포하는
+  배포판뿐입니다. 아카이브가 없으면 태스크가 이 이유를 말하고 멈춥니다. NIK 25.0.4.1 로 측정했습니다.
+  macOS 의 `windowing = AwtFree` 는 업스트림 GraalVM 25 (`graalvm-community-jdk-25`) 가 필요합니다.
+  AppKit 창은 프로세스의 첫 스레드에서 호출을 받으므로 `main` 이 그 스레드에서 돌아야 하는데, Liberica
+  NIK 는 macOS 에서 `-H:-RunMainInNewThread` 와 상관없이 `main` 을 새 스레드에서 돌립니다. 그렇게 빌드한
+  이미지는 첫 창 호출에서 멈추므로, 태스크는 빌드 전에 NIK 를 거부하고 어떤 GraalVM 을 쓰면 되는지
+  알려 줍니다. Linux 에서는 둘 다 됩니다.
 - **정적 skiko 아카이브.** compose-multiplatform-core-extended 의
   `extended/skiko/build-skiko-static-jvm.sh` 로 같은 시스템에서 빌드합니다. 단일 실행 파일은 Skia 를
   파일에서 불러올 수 없습니다.

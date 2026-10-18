@@ -234,9 +234,14 @@ per platform, with what was measured:
 
 ### Requirements
 
-- **GraalVM: Liberica NIK 25 Full.** The image links the JDK's AWT statically, and only a
-  distribution that ships the JDK's static archives can do that. The task stops with that
-  reason when they are missing. Measured with NIK 25.0.4.1.
+- **GraalVM, by windowing.** With `windowing = Awt`, Liberica NIK 25 Full: the image links the
+  JDK's AWT statically, and only a distribution that ships the JDK's static archives can do
+  that. The task stops with that reason when they are missing. Measured with NIK 25.0.4.1.
+  With `windowing = AwtFree` on macOS, upstream GraalVM 25 (`graalvm-community-jdk-25`): the
+  AppKit window takes its calls on the process's first thread, so `main` has to run there,
+  and Liberica NIK runs `main` on a new thread on macOS whatever `-H:-RunMainInNewThread` says.
+  The image it builds would hang at its first window call, so the task refuses NIK there
+  before building, and says which GraalVM to use. On Linux either one works.
 - **The static skiko archive**, from `extended/skiko/build-skiko-static-jvm.sh` in
   compose-multiplatform-core-extended, built on the same system. A single executable cannot
   load Skia from a file.

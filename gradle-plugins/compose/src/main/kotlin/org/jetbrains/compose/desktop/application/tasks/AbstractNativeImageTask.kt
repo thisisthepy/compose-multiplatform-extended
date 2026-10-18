@@ -24,6 +24,7 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
+import org.jetbrains.compose.desktop.application.internal.NativeImageMainThread
 import org.jetbrains.compose.desktop.application.internal.NativeImageNoAwt
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
@@ -123,6 +124,12 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         }
         val staticJdk = graalvm.resolve(platform.staticJdkDirectory)
         val awt = windowing.get() == ApplicationWindowing.Awt
+        // Before anything is built: on macOS an AWT-free image needs main on the first thread,
+        // which Liberica NIK does not give, and the image it builds hangs instead of failing.
+        if (platform == Platform.MacosArm64 && !awt) {
+            val release = graalvm.resolve("release")
+            NativeImageMainThread.problem(if (release.isFile) release.readText() else "")?.let { throw GradleException(it) }
+        }
         for (archive in if (awt) platform.staticJdkArchives else emptyList()) {
             if (!staticJdk.resolve(archive).isFile) {
                 throw GradleException(
@@ -583,6 +590,8 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             // One option per type: the option does not split its value at commas, so a joined
             // list names one type that does not exist and forbids nothing.
             NativeImageNoAwt.forbiddenTypes.map { "-H:ReportAnalysisForbiddenType=$it" } +
+            // On macOS the AppKit window takes its calls on the process's first thread, so main runs there.
+            (if (currentOS == OS.MacOS) NativeImageMainThread.options else emptyList()) +
             "-H:-UnlockExperimentalVMOptions"
     }
 

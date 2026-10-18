@@ -134,7 +134,9 @@ JDK's static AWT libraries. An AWT-free application on macOS needs a GraalVM tha
 the process's first thread when told `-H:-RunMainInNewThread`: the AppKit window hands its calls
 to that thread, which has to be serving them. Liberica NIK 25.0.4.1 runs `main` on a new thread
 on macOS whatever the option says, and the first call that crosses waits forever; upstream
-GraalVM honours it. The gate builds the AWT-free samples on macOS with upstream GraalVM 25.0.1,
+GraalVM honours it. `packageNativeImage` gives the option itself for an AWT-free macOS image, and
+refuses to start with Liberica NIK there (it reads `IMPLEMENTOR` in the GraalVM's `release`
+file), naming the GraalVM to use instead. The gate builds the AWT-free samples on macOS with upstream GraalVM 25.0.1,
 and `hello-awtfree` exits with a message rather than hanging when `main` is on another thread.
 
 ## The one-executable gate

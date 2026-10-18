@@ -27,3 +27,6 @@ private external fun pthreadMainNp(): Int
  * forever.
  */
 internal fun onFirstThread(): Boolean = pthreadMainNp() != 0
+
+/** The run's resize count, which only the Linux check reads; the macOS window keeps its own in C. */
+internal fun resizeReport(platform: WindowPlatform): String = "resize: counted by the window in C on macOS"

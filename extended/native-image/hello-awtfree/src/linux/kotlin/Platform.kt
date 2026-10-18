@@ -11,3 +11,6 @@ internal fun newSurface(platform: WindowPlatform): WindowSurface? = x11WindowSur
 
 /** X11 takes calls from any one thread, so where main runs does not matter here. */
 internal fun onFirstThread(): Boolean = true
+
+/** The window's own count of the sizes it took and the frames it presented for them. */
+internal fun resizeReport(platform: WindowPlatform): String = (platform as X11Window).resizeReport()

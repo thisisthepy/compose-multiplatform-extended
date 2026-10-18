@@ -101,7 +101,12 @@ fun main() {
     }
     val deadline = System.nanoTime() + 20_000_000_000L
     try {
-        while (host.presentLog.frames < 30 && System.nanoTime() < deadline && !host.closed) host.turn(16)
+        // A frame is drawn when something changed, and nothing changes in this content on its
+        // own, so each turn asks for one: 30 frames drawn and presented in a row.
+        while (host.presentLog.frames < 30 && System.nanoTime() < deadline && !host.closed) {
+            host.requestFrame()
+            host.turn(16)
+        }
     } finally {
         host.close()
     }

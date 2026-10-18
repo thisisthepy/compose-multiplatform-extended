@@ -332,6 +332,9 @@ jobs:
         env:
           SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
           CORE_EXTENDED: ${{ github.workspace }}/core-extended
+          # Temporary, while the macOS hang is traced: run 39079050531 sampled it with every
+          # frame of the image unnamed.
+          NATIVE_IMAGE_SYMBOLS: '1'
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 

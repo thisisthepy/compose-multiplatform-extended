@@ -48,6 +48,9 @@ compose.desktop.application {
         if (providers.environmentVariable("NATIVE_IMAGE_CALL_TREE").isPresent) {
             buildArgs.addAll("-H:+PrintAnalysisCallTree", "-H:PrintAnalysisCallTreeType=TXT")
         }
+        // NATIVE_IMAGE_SYMBOLS set: the executable keeps its local symbols, so a stack sampled
+        // from it (the gate samples one that hangs) names the methods it is in.
+        if (providers.environmentVariable("NATIVE_IMAGE_SYMBOLS").isPresent) buildArgs.add("-H:-DeleteLocalSymbols")
         providers.environmentVariable("SKIKO_STATIC").orNull?.let { skikoStaticDirectory.set(file(it)) }
     }
 }

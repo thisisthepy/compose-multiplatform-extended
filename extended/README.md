@@ -118,8 +118,9 @@ for command line programs.
   applications with a Compose window, in all three outputs above. A Kotlin/Native window app is
   packaged. It handles the command line outputs too. See [The Gradle plugin](#the-gradle-plugin).
 - **Kotlin/Native desktop for command line programs**, `org.thisisthepy.kotlin.native.desktop`:
-  no Compose and no window. **Status: open**, in
-  [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31). The id follows the Kotlin build tooling's naming
+  no Compose and no window. **Status: done**, from
+  [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31)
+  (`extended/kotlin-native-desktop`). The id follows the Kotlin build tooling's naming
   (`org.jetbrains.kotlin.native.cocoapods` maps to `org.thisisthepy.kotlin.native.<feature>`).
   Owner, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
 
@@ -188,10 +189,14 @@ MinGW-only path. The owner decided this on 2026-10-05:
 Install Visual Studio Build Tools with the MSVC toolset v14.51 or later, `clang-cl` and the
 Windows SDK. The GraalVM native image on Windows has the same toolset requirement (below).
 
-**Status: open** for Kotlin/Native. The MSVC link step for `mingwX64` is in
-[#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31), and the check that finds the
-tools at the start of the build and stops with an install message when one is missing is in
-[#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26). Neither is on `extended` yet.
+**Status: done** for Kotlin/Native, from
+[#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31):
+`org.thisisthepy.kotlin.native.desktop` links every `mingwX64` executable with MSVC, finds the
+tools at the start of the build and stops with an install message when one is missing, and
+links the MSVC half a library publishes beside its klib (skiko for mingwX64, with Skia and
+its ICU data compiled in), so the program is one file. The `extended-kotlin-msvc` workflow
+links and runs a program with it on Windows, and the core fork's `extended-publish-local`
+workflow links and runs a Compose program from the published repository alone.
 
 ### macOS signing and notarization
 

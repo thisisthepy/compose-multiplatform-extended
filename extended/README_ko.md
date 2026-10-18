@@ -65,7 +65,7 @@ cd gradle-plugins
 프로그램용 하나.
 
 - **Compose 데스크톱**, `org.thisisthepy.compose` (`gradle-plugins/compose/build.gradle.kts`): Compose 창이 있는 애플리케이션. 위 세 출력을 모두 냅니다. 창이 있는 Kotlin/Native 앱은 패키징합니다. 명령줄 출력도 맡습니다([Gradle 플러그인](#gradle-플러그인) 참고).
-- **명령줄 프로그램용 Kotlin/Native 데스크톱**, `org.thisisthepy.kotlin.native.desktop`: Compose 도 창도 없습니다. **상태: 열림.** [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31) 에 있습니다. ID 는 Kotlin 빌드 도구의 이름 규칙을 따릅니다
+- **명령줄 프로그램용 Kotlin/Native 데스크톱**, `org.thisisthepy.kotlin.native.desktop`: Compose 도 창도 없습니다. **상태: 완료.** [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31) 부터 있습니다(`extended/kotlin-native-desktop`). ID 는 Kotlin 빌드 도구의 이름 규칙을 따릅니다
   (`org.jetbrains.kotlin.native.cocoapods` 는 `org.thisisthepy.kotlin.native.<feature>` 에 대응합니다). 소유자, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
 
 Kotlin/Native 앱 종류별 출력입니다. 소유자, 2026-10-05:
@@ -120,9 +120,12 @@ MSVC 링커가 받아들이도록 고쳐 씁니다. 그다음 MSVC 링커가 Ski
 MSVC 툴셋 v14.51 이상, `clang-cl`, Windows SDK 가 있는 Visual Studio Build Tools 를 설치합니다. Windows 의 GraalVM
 native image 도 같은 툴셋이 필요합니다(아래).
 
-Kotlin/Native 쪽은 **상태: 열림.** `mingwX64` 의 MSVC 링크 단계는 [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31) 에 있고,
-빌드를 시작할 때 도구를 찾아 하나라도 없으면 설치 방법을 알려 주며 멈추는 검사는 [#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26)
-에 있습니다. 둘 다 아직 `extended` 에 없습니다.
+Kotlin/Native 쪽은 **상태: 완료.** [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31) 부터
+`org.thisisthepy.kotlin.native.desktop` 이 모든 `mingwX64` 실행 파일을 MSVC 로 링크하고, 빌드를 시작할 때 도구를 찾아
+하나라도 없으면 설치 방법을 알려 주며 멈추고, 라이브러리가 klib 옆에 게시한 MSVC 쪽(Skia 와 컴파일해 넣은 ICU 데이터를
+담은 mingwX64 용 skiko)을 함께 링크하므로 프로그램은 파일 하나입니다. `extended-kotlin-msvc` 워크플로가 Windows 에서
+프로그램을 링크해 실행하고, 코어 포크의 `extended-publish-local` 워크플로가 게시된 저장소만으로 Compose 프로그램을
+링크해 실행합니다.
 
 ### macOS 서명과 공증
 

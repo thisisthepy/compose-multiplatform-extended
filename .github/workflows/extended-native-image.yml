@@ -353,6 +353,29 @@ jobs:
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
+      # Liberica NIK runs main on a new thread on macOS whatever -H:-RunMainInNewThread says, and
+      # an AWT-free image built with it hangs at its first window call. packageNativeImage has to
+      # refuse it before building, with the reason.
+      - name: An AWT-free macOS image refuses Liberica NIK
+        if: runner.os == 'macOS'
+        working-directory: extended/native-image/hello-awtfree-link
+        env:
+          SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
+          CORE_EXTENDED: ${{ github.workspace }}/core-extended
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/liberica.tar.gz" "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/liberica" && tar xzf "$RUNNER_TEMP/liberica.tar.gz" -C "$RUNNER_TEMP/liberica"
+          rel="$(find "$RUNNER_TEMP/liberica" -name release -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
+          status=0
+          GRAALVM_HOME="$(dirname "$rel")" ./gradlew --no-daemon packageNativeImage > "$RUNNER_TEMP/liberica.log" 2>&1 || status=$?
+          tail -20 "$RUNNER_TEMP/liberica.log"
+          [ "$status" -ne 0 ] || { echo "packageNativeImage built an AWT-free macOS image with Liberica NIK" >&2; exit 1; }
+          grep -q "This GraalVM is Liberica NIK" "$RUNNER_TEMP/liberica.log" ||
+            { echo "it failed, but not with the reason" >&2; exit 1; }
+          echo "refused, with the reason"
+
       - name: Start the AwtFree link sample
         working-directory: extended/native-image/hello-awtfree-link
         shell: bash

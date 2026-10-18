@@ -6,8 +6,8 @@
 # modules and their Kotlin/Native klibs are built by that project's toolchain, and a klib is
 # read only by the compiler that wrote it or a newer one. The "One executable (Kotlin/Native)"
 # cells copy this directory into a checkout of the core fork as extended/window/samples/
-# hello-awtfree (src/ follows its links), list it in project.yaml beside common, scene and
-# native/linux, and build it for one architecture at a time. arm64 is cross compiled on x86-64,
+# hello-awtfree (src/ follows its links), list it in project.yaml beside common, scene,
+# native/linux and native/linux-scene, and build it for one architecture at a time. arm64 is cross compiled on x86-64,
 # because Kotlin/Native has no arm64 Linux host, and linked against the arm64 desktop libraries
 # native/linux's x11.def points at.
 product:
@@ -26,6 +26,8 @@ dependencies:
   - ../../common
   - ../../scene
   - ../../native/linux
+  # x11WindowSurface, where the scene draws on the Kotlin/Native X11 window.
+  - ../../native/linux-scene
 
 dependencies@linuxX64:
   - org.thisisthepy.compose.runtime:runtime-linuxx64:1.11.1-ext.1

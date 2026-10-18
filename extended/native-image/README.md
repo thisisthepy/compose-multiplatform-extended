@@ -165,7 +165,8 @@ only system libraries, and on runners with no `icudtl.dat` each prints
 "One executable (Kotlin/Native, linux-x64)" and "(Kotlin/Native, linux-arm64)" run the same gate
 on the same application built with Kotlin/Native: `extended/native-desktop/hello-awtfree`, whose
 content is this sample's own `Content.kt` and `TextSelfCheck.kt` (linked, not copied), hosted by
-the scene in the core fork's Kotlin/Native X11 window (`native/linux`). It is an Amper module of
+the scene in the core fork's Kotlin/Native X11 window (`native/linux`) and drawn through
+`native/linux-scene`'s `x11WindowSurface`. It is an Amper module of
 the core fork's window project rather than a Gradle build, because a klib is read only by the
 compiler that wrote it or a newer one, and the window modules are built by that project's
 toolchain. The "Build (Kotlin/Native, ...)" job copies it into a checkout of the core fork and

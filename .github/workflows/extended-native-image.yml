@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: 25b4920125f2794a51713f87cd0b0b97d6cee1d2
+  CORE_EXTENDED_REF: cc43a1f46b2c075add5644de84a2ca52b6c8d2ae
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
   # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
@@ -534,7 +534,7 @@ jobs:
           cp -RL "$GITHUB_WORKSPACE/extended/native-desktop/hello-awtfree" samples/hello-awtfree
           ls -la samples/hello-awtfree/src
           perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ linuxX64, linuxArm64 ]/m' scene/module.yaml
-          printf 'modules:\n  - common\n  - scene\n  - native/linux\n  - samples/hello-awtfree\n' > project.yaml
+          printf 'modules:\n  - common\n  - scene\n  - native/linux\n  - native/linux-scene\n  - samples/hello-awtfree\n' > project.yaml
           cat project.yaml
       - name: Build the executables
         shell: bash

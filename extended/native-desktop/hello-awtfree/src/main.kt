@@ -15,6 +15,7 @@ import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Surface
 import org.thisisthepy.compose.window.WindowConfig
 import org.thisisthepy.compose.window.linux.X11Window
+import org.thisisthepy.compose.window.linux.x11WindowSurface
 import org.thisisthepy.compose.window.scene.ComposeWindowHost
 import platform.posix.CLOCK_MONOTONIC
 import platform.posix.clock_gettime

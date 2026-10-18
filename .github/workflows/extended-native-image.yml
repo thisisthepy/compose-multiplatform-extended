@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: 88e8be1d0977256fe9345f5e74584cf378c72fc8
+  CORE_EXTENDED_REF: 57b4a0e102d837ba3271699297b69278fcefedef
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
   # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
@@ -339,9 +339,6 @@ jobs:
         env:
           SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
           CORE_EXTENDED: ${{ github.workspace }}/core-extended
-          # Temporary, while the macOS hang is traced: run 39079050531 sampled it with every
-          # frame of the image unnamed.
-          NATIVE_IMAGE_SYMBOLS: '1'
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 

@@ -31,6 +31,16 @@ internal object NativeImageNoAwt {
         "javax.swing.UIManager",
         "sun.awt.SunToolkit",
         "sun.java2d.SunGraphics2D",
+        // What loads AWT's native libraries without a window: the font manager, Java 2D's
+        // colour and image types, the cursor, and the clipboard. Each makes native-image link
+        // or copy libawt, libfontmanager and their kin.
+        "sun.font.FontManagerNativeLibrary",
+        "sun.font.SunFontManager",
+        "java.awt.Font",
+        "java.awt.Color",
+        "java.awt.Cursor",
+        "java.awt.image.ColorModel",
+        "java.awt.datatransfer.Clipboard",
     )
 
     /** Class and package prefixes that belong to java.desktop or to Compose's AWT layer. */

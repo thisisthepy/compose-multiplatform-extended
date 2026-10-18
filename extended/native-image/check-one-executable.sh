@@ -9,8 +9,9 @@
 #   <output directory>   build/compose/native-image/<name>, as packageNativeImage writes it
 #   <scratch directory>  emptied first; the executable runs from a directory inside it
 #
-# The application has to be one that runs the text self-check with HELLO_SELF_CHECK set,
-# printing "text self-check: ok", as extended/native-image/hello-awtfree does.
+# The application has to be one that runs the self-check with HELLO_SELF_CHECK set, as
+# extended/native-image/hello-awtfree does: "text self-check: ok", the inked pixel count, and the
+# frames of Compose content it presented.
 #
 # Needs a display. On Linux run it under `xvfb-run -a`. On Windows run it from Git Bash with
 # the MSVC tools (dumpbin) on PATH.
@@ -148,10 +149,28 @@ ls -la "$scratch/run"
 log="$scratch/run.log"
 png="$scratch/self-check.png"
 status=0
-case "$os" in
-    macos) ( cd "$scratch/run" && HELLO_SELF_CHECK="$png" perl -e 'alarm 120; exec @ARGV' "./$name" ) > "$log" 2>&1 || status=$? ;;
-    *) ( cd "$scratch/run" && HELLO_SELF_CHECK="$png" timeout 120 "./$name" ) > "$log" 2>&1 || status=$? ;;
-esac
+hang="$scratch/hang.txt"
+# Started in the background and watched, so that a run which never ends is stopped with the
+# stacks of every thread printed: the macOS window has hung intermittently on the hosted runner
+# after the text check, and a hang that only says "timed out" cannot be traced.
+( cd "$scratch/run" && HELLO_SELF_CHECK="$png" exec "./$name" ) > "$log" 2>&1 &
+pid=$!
+for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+if kill -0 "$pid" 2>/dev/null; then
+    case "$os" in
+        macos) sample "$pid" 3 -file "$hang" > /dev/null 2>&1 || true ;;
+        linux) command -v gdb > /dev/null &&
+            gdb -p "$pid" -batch -ex 'thread apply all bt' > "$hang" 2>&1 || true ;;
+        windows) : ;;
+    esac
+    kill -9 "$pid" 2> /dev/null || true
+    wait "$pid" 2> /dev/null || true
+    echo "== the application's own report (it was still running after 120 s and was stopped)"
+    cat "$log"
+    if [[ -s "$hang" ]]; then echo "== its threads when it was stopped"; cat "$hang"; fi
+    fail "the executable did not end on its own within 120 s" "Its report and its threads are above."
+fi
+wait "$pid" || status=$?
 echo "== the application's own report"
 cat "$log"
 [[ "$(ls -A "$scratch/run")" == "$name" ]] || fail "the executable left files beside itself" "$(ls -A "$scratch/run")"
@@ -159,6 +178,10 @@ grep -q "text self-check: ok" "$log" ||
     fail "the executable did not lay Korean text out correctly with no ICU data file" "Its own report is above."
 grep -q "inked [1-9][0-9]* pixels" "$log" || fail "the executable did not say it drew the sample text" "Its own report is above."
 [[ -s "$png" ]] || fail "the executable drew no PNG at $png"
+# The application hosts a Compose scene in its window and says how many frames it presented
+# and how many were drawn at a size other than the window's: some, and none.
+grep -qE '^scene: presented [1-9][0-9]* frames of Compose content, 0 at a size' "$log" ||
+    fail "the Compose scene presented no frames, or some at the wrong size" "Its own report is above."
 # A Java exception the application survived is still a lookup the image is missing (JNI or
 # reflection metadata), and it would fail somewhere a user is watching.
 if grep -E '^(java|kotlin|org)\.[A-Za-z0-9_.$]*(Exception|Error)\b' "$log"; then

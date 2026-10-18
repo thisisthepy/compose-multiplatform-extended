@@ -127,6 +127,16 @@ What it took, all in `windowsLink` and the static skiko archive:
 - Skia's ICU data is compiled into the skiko archive, since Skia otherwise looks for
   `icudtl.dat` beside the executable.
 
+## Which GraalVM
+
+An application with `windowing = Awt` needs Liberica NIK Full, the one distribution that ships the
+JDK's static AWT libraries. An AWT-free application on macOS needs a GraalVM that runs `main` on
+the process's first thread when told `-H:-RunMainInNewThread`: the AppKit window hands its calls
+to that thread, which has to be serving them. Liberica NIK 25.0.4.1 runs `main` on a new thread
+on macOS whatever the option says, and the first call that crosses waits forever; upstream
+GraalVM honours it. The gate builds the AWT-free samples on macOS with upstream GraalVM 25.0.1,
+and `hello-awtfree` exits with a message rather than hanging when `main` is on another thread.
+
 ## The one-executable gate
 
 `check-one-executable.sh` is what the "One executable (GraalVM, <os>)" jobs in
@@ -134,11 +144,16 @@ What it took, all in `windowsLink` and the static skiko archive:
 one file, that file names only the system's libraries (`otool -L`, `readelf -d` and `ldd`,
 `dumpbin -dependents`), and, copied alone into an empty directory on a runner with every
 `icudtl.dat` removed, it lays Korean out correctly (every glyph found, the word around a
-syllable whole, lines broken between words), draws it into a PNG and opens its window.
+syllable whole, lines broken between words), draws it into a PNG, and presents frames of
+Compose content in its window, none at a size other than the window's. `hello-awtfree` is a
+Compose application with no AWT: the core fork's scene module hosts its content in the GraalVM
+window, through the window's own surface (`appKitWindowSurface`, `x11WindowSurface`). A run
+that does not end within 120 s is stopped with every thread's stack printed.
 An executable that needs an ICU data file shows it there: a double click would select one
 syllable, and lines would wrap inside words.
 
-Measured by the gate, run 39028163166 (2026-10-17, NIK 25.0.4.1): `hello-awtfree` is one
+Measured by the gate, run 39028163166 (2026-10-17, NIK 25.0.4.1), before `hello-awtfree` hosted
+a Compose scene: it is one
 executable of 37.62 MB on macOS arm64, 46.27 MB on Linux x64 and 44.96 MB on Linux arm64, naming
 only system libraries, and on runners with no `icudtl.dat` each prints
 `text self-check: ok (no unresolved glyphs, word "반갑습니다", ...)` and inks the sample text.

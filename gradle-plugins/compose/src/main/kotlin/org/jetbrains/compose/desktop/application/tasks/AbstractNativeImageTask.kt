@@ -277,6 +277,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (library in listOf("stdc++", "GL", "X11", "Xext", "Xi", "Xrender", "Xtst", "fontconfig", "dl", "m", "pthread")) {
             linker("-l$library")
         }
+        // JetBrains' Skia for Linux arm64 finds GL through EGL, so an image that draws with GL
+        // there links it.
+        if (currentArch == Arch.Arm64) linker("-lEGL")
         return linked to link
     }
 
@@ -544,17 +547,18 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * analysis walks that branch whatever the property says, so `UIManager`, the toolkit and
      * GraalVM's copies of `libawt*.so` come into the image with it. The core fork's skiko-awt
      * (`extended/skiko/build-skiko-awt.sh`) puts the branch behind `AwtSwitch.available`, which
-     * is a constant once the class is initialised at build time with `-Dcompose.awt=false`.
+     * is a constant once the class is initialised at build time with `-Dcompose.awt=false`. The
+     * core fork's Compose reads the same property in `ExtendedAwt`, initialised the same way.
      *
      * The roots of AWT and Swing ([NativeImageNoAwt.forbiddenTypes]) are also made forbidden
      * types, so anything else that reaches AWT stops the build with the path that reached it, instead of an image that quietly carries
      * AWT's libraries beside it.
      */
     private fun awtFreeArguments(): List<String> {
-        val switch = "org/jetbrains/skiko/AwtSwitch.class"
-        val hasSwitch = runtimeClasspath.files.any { file ->
-            file.isFile && file.name.endsWith(".jar") && ZipFile(file).use { it.getEntry(switch) != null }
+        fun onClasspath(entry: String) = runtimeClasspath.files.any { file ->
+            file.isFile && file.name.endsWith(".jar") && ZipFile(file).use { it.getEntry(entry) != null }
         }
+        val hasSwitch = onClasspath("org/jetbrains/skiko/AwtSwitch.class")
         if (!hasSwitch) {
             throw GradleException(
                 "windowing = AwtFree needs skiko-awt with the AWT switch (org.jetbrains.skiko.AwtSwitch), and the runtime classpath's " +
@@ -562,15 +566,24 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
                     "`extended/skiko/build-skiko-awt.sh <work-dir>` from compose-multiplatform-core-extended."
             )
         }
+        // The core fork's Compose has the same switch for its own AWT paths (the system
+        // clipboard, the clipboard entry that reads a Transferable, the key names, skiko's
+        // Swing dispatcher). JetBrains' Compose has none, and the forbidden types below then
+        // say where it reaches AWT.
+        val composeSwitch = "androidx.compose.ui.internal.ExtendedAwt"
+        val switches = listOf("org.jetbrains.skiko.AwtSwitch") +
+            if (onClasspath(composeSwitch.replace('.', '/') + ".class")) listOf(composeSwitch) else emptyList()
         return listOf(
             "-Dcompose.awt=false",
-            "--initialize-at-build-time=org.jetbrains.skiko.AwtSwitch",
+            "--initialize-at-build-time=${switches.joinToString(",")}",
             // Turns on AwtFreeSubstitutions, which cut skiko's Swing frame watcher and dispatcher.
             "-Dcompose.nativeimage.awtFree=true",
             "-H:+UnlockExperimentalVMOptions",
-            "-H:ReportAnalysisForbiddenType=${NativeImageNoAwt.forbiddenTypes.joinToString(",")}",
-            "-H:-UnlockExperimentalVMOptions",
-        )
+        ) +
+            // One option per type: the option does not split its value at commas, so a joined
+            // list names one type that does not exist and forbids nothing.
+            NativeImageNoAwt.forbiddenTypes.map { "-H:ReportAnalysisForbiddenType=$it" } +
+            "-H:-UnlockExperimentalVMOptions"
     }
 
     /**

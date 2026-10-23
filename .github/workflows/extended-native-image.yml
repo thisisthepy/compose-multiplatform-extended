@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: feat/publish-one-version-line
+  CORE_EXTENDED_REF: 57b4a0e102d837ba3271699297b69278fcefedef
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
   # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
@@ -185,6 +185,8 @@ jobs:
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          mkdir -p ~/.cache/JetBrains/Kotlin/download.cache
+          curl -fsSL -o ~/.cache/JetBrains/Kotlin/download.cache/bd467c5b70-OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" || true
           cp project.yaml project.yaml.all
           printf 'modules:\n' > project.yaml
           for m in common scene graalvm/graalvm-macos graalvm/graalvm-linux; do printf '  - %s\n' "$m" >> project.yaml; done
@@ -308,6 +310,15 @@ jobs:
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          if [ "$RUNNER_OS" = macOS ]; then
+            cache="$HOME/Library/Caches/JetBrains/Kotlin/download.cache"
+            mkdir -p "$cache"
+            curl -fsSL -o "$cache/f8362503fc-OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.5_8.tar.gz" "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.5_8.tar.gz" || true
+          elif [ "$RUNNER_OS" = Linux ]; then
+            cache="$HOME/.cache/JetBrains/Kotlin/download.cache"
+            mkdir -p "$cache"
+            curl -fsSL -o "$cache/bd467c5b70-OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" || true
+          fi
           # The module lists are core-extended's own extended-window-publish matrix.
           # The samples link the GraalVM window layers, and hello-awtfree hosts a scene in them.
           # native/macos is the Kotlin/Native window and compiles against the core fork's

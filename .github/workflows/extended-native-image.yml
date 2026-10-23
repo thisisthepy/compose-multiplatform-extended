@@ -180,6 +180,8 @@ jobs:
         run: |
           perl -0pi -e 's/^  platforms: \[ jvm, macosArm64 \]$/  platforms: [ jvm ]/m' scene/module.yaml
           grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' common/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' common/module.yaml
       - name: Publish the window modules to mavenLocal
         shell: bash
         working-directory: core-extended/extended/window
@@ -304,6 +306,8 @@ jobs:
         run: |
           perl -0pi -e 's/^  platforms: \[ jvm, macosArm64 \]$/  platforms: [ jvm ]/m' scene/module.yaml
           grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' common/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' common/module.yaml
       - name: Publish the window modules to mavenLocal
         if: runner.os == 'macOS'
         shell: bash

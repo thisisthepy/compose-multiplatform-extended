@@ -28,7 +28,9 @@ fi
 fail() {
     echo "fail  $1" >&2
     shift
-    for line in "$@"; do echo "      $line" >&2; done
+    for arg in "$@"; do
+        while IFS= read -r line; do [[ -n "$line" ]] && echo "      $line" >&2; done <<< "$arg"
+    done
     exit 1
 }
 
@@ -201,8 +203,15 @@ case "$os" in
         accessed="$(sed -n 's/.*"\(\/[^"]*\)".*/\1/p' "$runtime_log" | sort -u)"
         ;;
     macos)
-        ( cd "$scratch/run" && HELLO_SELF_CHECK="$scratch/again.png" DYLD_PRINT_LIBRARIES=1 \
-            perl -e 'alarm 120; exec @ARGV' "./$name" ) > "$runtime_log" 2>&1 || true
+        ( cd "$scratch/run" && HELLO_SELF_CHECK="$scratch/again.png" DYLD_PRINT_LIBRARIES=1 exec "./$name" ) > "$runtime_log" 2>&1 &
+        pid=$!
+        for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        else
+            wait "$pid" 2>/dev/null || true
+        fi
         accessed="$(sed -n 's/^dyld\[[0-9]*\]: <[^>]*> //p; s/^dyld\[[0-9]*\]: //p' "$runtime_log" | awk '{print $1}' | sort -u)"
         ;;
     windows) accessed="" ;;
@@ -212,7 +221,7 @@ java_paths=()
 for home in "${GRAALVM_HOME:-}" "${JAVA_HOME:-}"; do [[ -n "$home" ]] && java_paths+=("$home"); done
 found=""
 while IFS= read -r path; do
-    [[ -n "$path" ]] || continue
+    [[ -n "$path" && "$path" == /* ]] || continue
     case "$path" in
         */lib/modules|*/jvm.cfg|*/libjvm.*|*/libjava.*|*/conf/security/java.security) found+="$path"$'\n'; continue ;;
     esac
@@ -223,7 +232,7 @@ while IFS= read -r path; do
         case "$path" in /usr/lib/*|/System/*) ;; *) [[ "$path" == "$scratch/run/$name" ]] || found+="$path (a library outside the system)"$'\n' ;; esac
     fi
 done <<< "$accessed"
-[[ -z "$found" ]] || fail "running the executable looked for a Java runtime or a library of its own" $found
+[[ -z "$found" ]] || fail "running the executable looked for a Java runtime or a library of its own" "$found"
 echo "-- run watched ($( [[ "$os" == macos ]] && echo "every library loaded" || echo "every file accessed")): $(wc -l <<< "$accessed" | tr -d ' ') paths, none in a Java runtime"
 
 echo "ok    $name is one executable: system libraries only, Korean laid out with no ICU data file"

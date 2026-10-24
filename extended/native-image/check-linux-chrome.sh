@@ -50,8 +50,13 @@ log="$scratch/app.log"
 title="안녕하세요, AwtFree"
 # The window counts every size it takes and every frame it presents against the size it has
 # at that moment, which DXC_REPORT_RESIZE asks of it.
+sleep 1
 ( cd "$scratch" && DXC_REPORT_RESIZE=1 HELLO_RUN_SECONDS=240 exec "$executable" ) > "$log" 2>&1 &
 app=$!
+for _ in $(seq 1 50); do
+    xdotool search --name "AwtFree" >/dev/null 2>&1 && break
+    sleep 0.1
+done
 status=0
 WM_DRAG_STEPS=40 "$scripts/wm-chrome.sh" "AwtFree" modern 46 || status=$?
 echo "== wm-chrome.sh exit $status"

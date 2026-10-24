@@ -30,7 +30,6 @@ configurations.all {
     resolutionStrategy.capabilitiesResolution.withCapability("org.jetbrains.skiko:skiko-awt") {
         select("org.thisisthepy.compose.skiko:skiko-awt:1.11.1-ext.1")
     }
-    }
 }
 
 compose.desktop.application {

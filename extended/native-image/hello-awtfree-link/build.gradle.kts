@@ -26,6 +26,12 @@ dependencies {
     implementation("org.thisisthepy.compose.skiko:skiko-awt:1.11.1-ext.1")
 }
 
+configurations.all {
+    resolutionStrategy.capabilitiesResolution.withCapability("org.jetbrains.skiko:skiko-awt") {
+        selectHighestVersion()
+    }
+}
+
 compose.desktop.application {
     mainClass = "link.MainKt"
     windowing = org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing.AwtFree

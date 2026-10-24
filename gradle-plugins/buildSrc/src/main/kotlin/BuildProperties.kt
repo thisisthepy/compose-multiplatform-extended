@@ -22,11 +22,12 @@ object BuildProperties {
 
     /**
      * The version JetBrains published the same Compose as: [composeVersion] without the fork's
-     * `-ext.<N>` suffix. The few libraries the fork does not publish (components, Compose HTML)
-     * are still JetBrains' and are asked for at this version.
+     * `-ext.<N>` suffix, and without the `-dev` or `-dev.<commit>` of a local or GitHub Packages
+     * dev build. The few libraries the fork does not publish (components, Compose HTML) are
+     * still JetBrains' and are asked for at this version.
      */
     fun composeUpstreamVersion(project: Project): String =
-        composeVersion(project).replace(Regex("-ext\\.\\d+(-dev)?$"), "")
+        composeVersion(project).replace(Regex("-ext\\.\\d+(-dev(\\.[0-9a-f]+)*)?$"), "")
     fun composeMaterial3Version(project: Project): String =
         project.findProperty("compose.material3.version") as String
     fun testsAndroidxCompilerVersion(project: Project): String =

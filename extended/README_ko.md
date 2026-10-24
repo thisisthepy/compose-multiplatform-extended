@@ -277,3 +277,64 @@ plugins {
 별칭이 가리키는 라이브러리는 아직 공개 저장소에 없습니다. 먼저 core 포크에서 배포합니다
 (`extended/compose/publish-local.sh`, core 포크의
 [Maven 좌표](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README_ko.md#maven-좌표) 참고).
+
+## GitHub Packages 의 개발 빌드
+
+`extended` 에 병합할 때마다 플러그인과 그 마커, 함께 있는 라이브러리를 GitHub Packages 에
+`<deploy.version>-dev.<commit>.<core commit>` 으로 배포합니다. 앞은 이 저장소 병합 커밋의 앞 열
+글자이고, 뒤는 플러그인의 별칭이 가리키는 core 포크 개발 빌드의 커밋입니다(예:
+`1.11.1-ext.1-dev.0123456789.abcdef0123`). 그 core 빌드는 플러그인을 빌드할 때 core 포크가 가장 최근에
+성공한 개발 배포이고, core 포크의 개발 배포도 끝날 때마다 자기를 가리키는 플러그인 개발 빌드를
+시작합니다. 그래서 플러그인 개발 빌드는 늘 GitHub Packages 에 있는 Compose 라이브러리를 가리킵니다.
+`.github/workflows/extended-publish.yml` 이 이 일을 하며, 올리기 전에 빌드를 검사합니다. 접미사 없는 포크
+버전이 없는지, 모든 플러그인 ID 를 빌드만으로 적용할 수 있는지, 플러그인 안에 담긴 버전이 맞는지 봅니다.
+서명은 하지 않습니다.
+
+저장소는 `https://maven.pkg.github.com/thisisthepy/compose-multiplatform-extended` 이고, 라이브러리는
+`https://maven.pkg.github.com/thisisthepy/compose-multiplatform-core-extended` 에 있습니다. GitHub
+Packages 는 공개 패키지라도 Maven 다운로드마다 인증을 요구합니다. 배포한 저장소의 워크플로에서는
+`packages: read` 를 준 `GITHUB_TOKEN` 으로 됩니다. 다른 저장소의 워크플로를 포함해 그 밖의 곳에서는
+`read:packages` 범위의 개인 액세스 토큰(classic)을 씁니다. Maven 레지스트리에는 다른 저장소의
+`GITHUB_TOKEN` 을 들여보내는 패키지별 접근 설정이 없기 때문입니다.
+
+```kotlin
+// settings.gradle.kts
+// pluginManagement 은 스크립트의 나머지보다 먼저 평가되므로, 블록마다 저장소를 전부 적습니다.
+pluginManagement {
+    repositories {
+        maven("https://maven.pkg.github.com/thisisthepy/compose-multiplatform-extended") {
+            credentials {
+                username = providers.environmentVariable("GITHUB_ACTOR").orNull ?: "token"
+                password = providers.environmentVariable("GITHUB_PACKAGES_TOKEN").get()
+            }
+            content { includeGroupByRegex("org\\.thisisthepy(\\..*)?") }
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        maven("https://maven.pkg.github.com/thisisthepy/compose-multiplatform-core-extended") {
+            credentials {
+                username = providers.environmentVariable("GITHUB_ACTOR").orNull ?: "token"
+                password = providers.environmentVariable("GITHUB_PACKAGES_TOKEN").get()
+            }
+            content { includeGroupByRegex("org\\.thisisthepy(\\..*)?") }
+        }
+        mavenCentral()
+        google()
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
+plugins {
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev.<commit>.<core commit>"
+}
+```
+
+원하는 core 빌드를 가리키는 플러그인 개발 빌드가 아직 없다면, 별칭 대신 라이브러리를 명시적인
+`-dev.<core commit>` 좌표(`org.thisisthepy.compose.foundation:foundation:1.11.1-ext.1-dev.<core commit>`)
+로 지정하고, 포크 라이브러리를 모두 같은 core 커밋으로 맞춥니다.

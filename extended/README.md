@@ -364,3 +364,67 @@ plugins {
 The libraries the aliases name are not on a public repository yet; publish them from the core
 fork first (`extended/compose/publish-local.sh`, see the core fork's
 [Maven coordinates](https://github.com/thisisthepy/compose-multiplatform-core-extended/blob/extended/extended/README.md#maven-coordinates)).
+
+## Dev builds on GitHub Packages
+
+Every merge into `extended` publishes the plugin, its marker and the libraries beside it to
+GitHub Packages as `<deploy.version>-dev.<commit>.<core commit>`: the first ten characters of
+this repository's merge commit, then of the core fork commit whose dev build the plugin's
+aliases name (`1.11.1-ext.1-dev.0123456789.abcdef0123`, for example). That core build is the
+core fork's latest successful dev publish when the plugin is built, and each core dev publish
+also starts a plugin dev build against itself, so every plugin dev build names Compose
+libraries that exist on GitHub Packages. `.github/workflows/extended-publish.yml` does it, and
+checks the build before uploading: no fork version without the suffix, every plugin ID
+applied from the build alone, and the versions the plugin carries inside. Not signed.
+
+The repository is `https://maven.pkg.github.com/thisisthepy/compose-multiplatform-extended`, and
+the libraries are in `https://maven.pkg.github.com/thisisthepy/compose-multiplatform-core-extended`.
+GitHub Packages asks for credentials on every Maven download, public packages included: in a
+workflow of the publishing repository `GITHUB_TOKEN` with `packages: read` works; anywhere else,
+including another repository's workflow, use a personal access token (classic) with the
+`read:packages` scope, since the Maven registry has no per-package access setting that would let
+another repository's `GITHUB_TOKEN` in.
+
+```kotlin
+// settings.gradle.kts
+// pluginManagement is evaluated before the rest of the script, so each block names its
+// repository in full.
+pluginManagement {
+    repositories {
+        maven("https://maven.pkg.github.com/thisisthepy/compose-multiplatform-extended") {
+            credentials {
+                username = providers.environmentVariable("GITHUB_ACTOR").orNull ?: "token"
+                password = providers.environmentVariable("GITHUB_PACKAGES_TOKEN").get()
+            }
+            content { includeGroupByRegex("org\\.thisisthepy(\\..*)?") }
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        maven("https://maven.pkg.github.com/thisisthepy/compose-multiplatform-core-extended") {
+            credentials {
+                username = providers.environmentVariable("GITHUB_ACTOR").orNull ?: "token"
+                password = providers.environmentVariable("GITHUB_PACKAGES_TOKEN").get()
+            }
+            content { includeGroupByRegex("org\\.thisisthepy(\\..*)?") }
+        }
+        mavenCentral()
+        google()
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
+plugins {
+    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev.<commit>.<core commit>"
+}
+```
+
+Until a plugin dev build exists for the core build you want, name the libraries by their
+explicit `-dev.<core commit>` coordinates
+(`org.thisisthepy.compose.foundation:foundation:1.11.1-ext.1-dev.<core commit>`) instead of
+the aliases, and keep every fork library at the same core commit.

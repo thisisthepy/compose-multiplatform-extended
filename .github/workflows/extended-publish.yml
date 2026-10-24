@@ -147,7 +147,9 @@ jobs:
             echo "::error::$tag is on $commit, which is not a merge commit; a release is the merge into extended"
             exit 1
           fi
-          if ! git rev-list --first-parent origin/extended | grep -qx "$commit"; then
+          # No -q: grep -q exits on the first match, rev-list then dies of SIGPIPE (141)
+          # and pipefail fails the check whenever the tag is on extended's head.
+          if ! git rev-list --first-parent origin/extended | grep -x "$commit" >/dev/null; then
             echo "::error::$tag is on $commit, which is not on extended's first-parent line"
             exit 1
           fi

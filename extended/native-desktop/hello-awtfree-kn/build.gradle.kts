@@ -16,7 +16,7 @@ plugins {
 // The core fork's Compose and window modules, as compose-multiplatform-core-extended publishes
 // them to the local Maven repository.
 val compose = "1.11.1-ext.1"
-val window = "0.1.0"
+val window = "1.11.1-ext.1"
 
 kotlin {
     macosArm64 {

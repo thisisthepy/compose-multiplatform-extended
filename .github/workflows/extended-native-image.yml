@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: fd733c8395fb24d107752a56d6893f486e46a62a
+  CORE_EXTENDED_REF: 8629ed14f63e27747a9d9b14cd68366355678f2f
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
   # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
@@ -454,19 +454,6 @@ jobs:
           exe="$(find "$out" -mindepth 1 -maxdepth 1 -type f | head -1)"
           bash extended/native-image/check-linux-chrome.sh "$exe" core-extended "$RUNNER_TEMP/chrome"
 
-      # Said here rather than left out: an application built from source with this plugin needs a
-      # JDK on the machine that builds it, because Gradle, the Kotlin compiler and native-image
-      # all run on one. Needing nothing but the platform's linker holds only where the renderer
-      # arrives already built, as compose-rust's does (its build script downloads it); it cannot
-      # hold for this build, so this gate does not check it.
-      - name: What this gate does not check, and why
-        shell: bash
-        run: |
-          echo "The executable checked above needs no Java runtime to run. Building it did need one:"
-          echo "  java: $(java -version 2>&1 | head -1)"
-          echo "  native-image: $("$GRAALVM_HOME/bin/native-image" --version 2>&1 | head -1)"
-          echo "A build that needs only the platform's linker is one whose renderer arrives prebuilt."
-
       - name: Keep the self-check drawing
         if: always()
         uses: actions/upload-artifact@v4
@@ -536,8 +523,9 @@ jobs:
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ macosArm64 ]/m' scene/module.yaml
           cp project.yaml project.yaml.all
-          printf 'modules:\n  - common\n  - native/macos\n' > project.yaml
+          printf 'modules:\n  - common\n  - scene\n  - native/macos\n' > project.yaml
           ./kotlin publish mavenLocal
           cp project.yaml.all project.yaml
           find ~/.m2/repository/org/thisisthepy/compose/window -name '*.module' | sort

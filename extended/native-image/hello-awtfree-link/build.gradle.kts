@@ -28,7 +28,7 @@ dependencies {
 
 configurations.all {
     resolutionStrategy.capabilitiesResolution.withCapability("org.jetbrains.skiko:skiko-awt") {
-        selectHighestVersion()
+        select("org.thisisthepy.compose.skiko:skiko-awt:1.11.1-ext.1")
     }
 }
 

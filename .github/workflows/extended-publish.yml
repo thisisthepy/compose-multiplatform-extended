@@ -298,10 +298,10 @@ jobs:
           python3 -I extended/publish/central_bundle.py stage --from "$RUNNER_TEMP/dev-repo" \
             --out "$RUNNER_TEMP/dev" --project thisisthepy/compose-multiplatform-extended
           python3 -I extended/publish/central_bundle.py sign "$RUNNER_TEMP/dev" --checksums-only
-          required=()
-          for coordinate in $REQUIRED; do required+=(--require "$coordinate"); done
+          req_args=()
+          for coordinate in $REQUIRED; do req_args+=(--require "$coordinate"); done
           python3 -I extended/publish/central_bundle.py validate "$RUNNER_TEMP/dev" \
-            --dev="$SUFFIX" --unsigned "${required[@]}"
+            --dev="$SUFFIX" --unsigned "${req_args[@]}"
           python3 -I "$RUNNER_TEMP/markers.py" "$RUNNER_TEMP/dev" "$VERSION$SUFFIX"
           bash "$RUNNER_TEMP/consume.sh" "$RUNNER_TEMP/dev" "$VERSION$SUFFIX"
 
@@ -379,10 +379,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          required=()
-          for coordinate in $REQUIRED; do required+=(--require "$coordinate"); done
+          req_args=()
+          for coordinate in $REQUIRED; do req_args+=(--require "$coordinate"); done
           python3 -I extended/publish/central_bundle.py validate "$RUNNER_TEMP/staging" \
-            --version "$VERSION" --verify-signatures "${required[@]}"
+            --version "$VERSION" --verify-signatures "${req_args[@]}"
           python3 -I "$RUNNER_TEMP/markers.py" "$RUNNER_TEMP/staging" "$VERSION"
           bash "$RUNNER_TEMP/consume.sh" "$RUNNER_TEMP/staging" "$VERSION"
 

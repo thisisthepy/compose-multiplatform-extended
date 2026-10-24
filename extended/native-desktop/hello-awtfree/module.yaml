@@ -1,0 +1,76 @@
+# The AWT-free sample as a Kotlin/Native executable for Linux: the same Compose content as
+# extended/native-image/hello-awtfree, hosted by the core fork's scene module in its
+# Kotlin/Native X11 window (native/linux), with no virtual machine in the file.
+#
+# An Amper module of the core fork's window project, not a Gradle build of its own: the window
+# modules and their Kotlin/Native klibs are built by that project's toolchain, and a klib is
+# read only by the compiler that wrote it or a newer one. The "One executable (Kotlin/Native)"
+# cells copy this directory into a checkout of the core fork as extended/window/samples/
+# hello-awtfree (src/ follows its links), list it in project.yaml beside common, scene,
+# native/linux and native/linux-scene, and build it for one architecture at a time. arm64 is cross compiled on x86-64,
+# because Kotlin/Native has no arm64 Linux host, and linked against the arm64 desktop libraries
+# native/linux's x11.def points at.
+product:
+  type: linux/app
+  platforms: [ linuxX64, linuxArm64 ]
+
+# Compose's compiler plugin through the core fork's template, as the window modules do.
+apply:
+  - ../../compose.module-template.yaml
+
+repositories:
+  - id: mavenLocal
+    url: mavenLocal
+
+dependencies:
+  - ../../common
+  - ../../scene
+  - ../../native/linux
+  # x11WindowSurface, where the scene draws on the Kotlin/Native X11 window.
+  - ../../native/linux-scene
+
+dependencies@linuxX64:
+  - org.thisisthepy.compose.runtime:runtime-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.runtime:runtime-saveable-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.animation:animation-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.animation:animation-core-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.foundation:foundation-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.foundation:foundation-layout-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.material:material-ripple-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.material3:material3-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-backhandler-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-geometry-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-graphics-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-text-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-tooling-preview-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-unit-linuxx64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-util-linuxx64:1.11.1-ext.1
+
+dependencies@linuxArm64:
+  - org.thisisthepy.compose.runtime:runtime-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.runtime:runtime-saveable-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.animation:animation-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.animation:animation-core-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.foundation:foundation-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.foundation:foundation-layout-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.material:material-ripple-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.material3:material3-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-backhandler-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-geometry-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-graphics-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-text-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-tooling-preview-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-unit-linuxarm64:1.11.1-ext.1
+  - org.thisisthepy.compose.ui:ui-util-linuxarm64:1.11.1-ext.1
+
+settings:
+  native:
+    entryPoint: awtfree.main
+  kotlin:
+    freeCompilerArgs:
+      - -module-name
+      - org.thisisthepy.compose.samples:hello-awtfree
+    optIns:
+      - kotlinx.cinterop.ExperimentalForeignApi

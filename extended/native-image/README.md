@@ -31,7 +31,7 @@ local Maven repository first, as development builds, which is what the probe wor
     -Pjetbrains.publication.libraries=COMPOSE,COMPOSE_MATERIAL3 -Pextended.publication.dev=true
 # in gradle-plugins
 ./gradlew :compose:publishToMavenLocal -Pdeploy.version=1.11.1-ext.1-dev \
-    -Pcompose.version=1.11.1-ext.1-dev -Pcompose.material3.version=1.11.0-alpha07-ext.1-dev
+    -Pcompose.version=1.11.1-ext.1-dev -Pcompose.material3.version=1.11.1-ext.1-dev
 ```
 
 The agent writes its metadata on a clean exit, so close the application rather than kill
@@ -164,6 +164,39 @@ a Compose scene: it is one
 executable of 37.62 MB on macOS arm64, 46.27 MB on Linux x64 and 44.96 MB on Linux arm64, naming
 only system libraries, and on runners with no `icudtl.dat` each prints
 `text self-check: ok (no unresolved glyphs, word "반갑습니다", ...)` and inks the sample text.
+
+### The Kotlin/Native cells
+
+"One executable (Kotlin/Native, linux-x64)" and "(Kotlin/Native, linux-arm64)" run the same gate
+on the same application built with Kotlin/Native: `extended/native-desktop/hello-awtfree`, whose
+content is this sample's own `Content.kt` and `TextSelfCheck.kt` (linked, not copied), hosted by
+the scene in the core fork's Kotlin/Native X11 window (`native/linux`) and drawn through
+`native/linux-scene`'s `x11WindowSurface`. It is an Amper module of
+the core fork's window project rather than a Gradle build, because a klib is read only by the
+compiler that wrote it or a newer one, and the window modules are built by that project's
+toolchain. The "Build (Kotlin/Native, ...)" job copies it into a checkout of the core fork and
+builds both executables on x86-64, arm64 cross compiled, since Kotlin/Native has no arm64 Linux
+host; each is then run on its own architecture.
+
+### Window chrome and a reader on Linux
+
+`check-linux-chrome.sh` runs after the gate on every Linux cell, GraalVM and Kotlin/Native. It
+starts the application with `HELLO_RUN_SECONDS` on a virtual display and a session bus of its
+own, with openbox and at-spi2, and requires:
+
+- no title bar of the window manager's (`WindowChrome.Modern`, the default): `_NET_FRAME_EXTENTS`
+  is all zero;
+- a drag of the scene's caption moves the window by as far as the pointer went, a drag at each
+  edge and corner changes the size from that side only, and a double click in the caption
+  maximises it and a second restores it (the core fork's `extended/window/scripts/wm-chrome.sh`);
+- no frame presented at a size the window had already left, and no size the window took left
+  without a frame (the window's own `dxc resize:` count);
+- walking the application's AT-SPI tree with libatspi finds the text field (`entry` "Name"), its
+  label (`label` "Name"), the button (`push button` "click me") and the caption's three buttons;
+  setting the field's text and pressing the button reach the application, and pressing Close
+  closes it (the core fork's `extended/window/scripts/atspi-readback.c`).
+
+Whether Orca reads the window well, and how a drag feels, are checks by hand on a desktop.
 
 ## Running the Windows probe locally
 

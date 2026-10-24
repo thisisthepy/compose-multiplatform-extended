@@ -27,10 +27,9 @@ dependencies {
 }
 
 configurations.all {
-    resolutionStrategy.dependencySubstitution {
-        substitute(module("org.jetbrains.skiko:skiko-awt"))
-            .using(module("org.thisisthepy.compose.skiko:skiko-awt:1.11.1-ext.1"))
-            .because("AWT-free skiko-awt with AwtSwitch")
+    resolutionStrategy.capabilitiesResolution.withCapability("org.jetbrains.skiko:skiko-awt") {
+        select("org.thisisthepy.compose.skiko:skiko-awt:1.11.1-ext.1")
+    }
     }
 }
 

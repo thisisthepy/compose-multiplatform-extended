@@ -22,3 +22,6 @@ internal fun platformChecks(host: ComposeWindowHost, platform: WindowPlatform, c
     println("chrome: not checked on this desktop; the X11 window's title bar and accessibility checks are added with it")
     return true
 }
+
+/** The window's own count of the sizes it took and the frames it presented for them. */
+internal fun resizeReport(platform: WindowPlatform): String = (platform as X11Window).resizeReport()

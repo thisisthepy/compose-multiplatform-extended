@@ -224,7 +224,7 @@ jobs:
           - name: linux-arm64
             os: ubuntu-24.04-arm
             nik: vm-openjdk25.0.4.1+2-25.0.4.1+1-linux-aarch64
-          # The Kotlin/Native cells are the package-kn job below.
+          # The Kotlin/Native cells are the package-kn and kn-* jobs below.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 240
     env:
@@ -441,6 +441,19 @@ jobs:
           else
             bash extended/native-image/check-one-executable.sh "$out" "$RUNNER_TEMP/one-executable"
           fi
+      # The window chrome and a screen reader, on the same executable: openbox drags its caption
+      # and every edge, double clicks to maximise, and libatspi walks its AT-SPI tree for the
+      # field, its label and the button, sets the field and presses the button and Close.
+      - name: Window chrome and a reader (openbox and at-spi2, under a virtual display)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -q --no-install-recommends openbox xdotool x11-utils dbus at-spi2-core libatspi2.0-dev
+          out="$(find "$SAMPLE_AWTFREE/build/compose/native-image" -mindepth 1 -maxdepth 1 -type d | head -1)"
+          exe="$(find "$out" -mindepth 1 -maxdepth 1 -type f | head -1)"
+          bash extended/native-image/check-linux-chrome.sh "$exe" core-extended "$RUNNER_TEMP/chrome"
+
       # Said here rather than left out: an application built from source with this plugin needs a
       # JDK on the machine that builds it, because Gradle, the Kotlin compiler and native-image
       # all run on one. Needing nothing but the platform's linker holds only where the renderer
@@ -558,6 +571,172 @@ jobs:
         shell: bash
         run: bash extended/native-image/check-one-executable.sh "$RUNNER_TEMP/kn-out" "$RUNNER_TEMP/one-executable"
 
+      - name: Keep the self-check drawing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-executable-kn-${{ matrix.name }}
+          path: ${{ runner.temp }}/one-executable/*.png
+          if-no-files-found: ignore
+
+  # The same application as a Kotlin/Native executable for Linux: the content of hello-awtfree
+  # hosted by the core fork's scene in its Kotlin/Native X11 window (native/linux), built by the
+  # core fork's own toolchain as a module of its window project (extended/native-desktop/
+  # hello-awtfree says why). Kotlin/Native has no arm64 Linux host, so both architectures are
+  # built here on x86-64; the arm64 executable is linked against the arm64 desktop libraries
+  # and run on an arm64 runner by kn-linux-arm64.
+  kn-build:
+    name: Build (Kotlin/Native, linux-x64 and linux-arm64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            extended/native-desktop/hello-awtfree
+            extended/native-image/hello-awtfree/src/main/kotlin
+            extended/ci
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: extended/window
+      - name: Make room for the Compose build
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell \
+            /usr/local/lib/node_modules /usr/local/julia* /opt/microsoft /opt/google
+          df -h /
+      - name: The X11, GL, fontconfig and FreeType development libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q pkg-config libx11-dev libxext-dev libgl1-mesa-dev \
+            libfontconfig1-dev libfreetype6-dev
+      # The arm64 executable is linked here, so the arm64 libraries it names have to be here,
+      # where native/linux's x11.def looks for them (/usr/lib/aarch64-linux-gnu).
+      - name: The arm64 desktop libraries to link against
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture arm64
+          for sources in /etc/apt/sources.list.d/*.sources; do
+            sudo sed -i '/^Types: deb$/a Architectures: amd64' "$sources"
+          done
+          [[ ! -f /etc/apt/sources.list ]] || sudo sed -i 's/^deb \(http\)/deb [arch=amd64] \1/' /etc/apt/sources.list
+          printf '%s\n' 'Types: deb' 'URIs: http://ports.ubuntu.com/ubuntu-ports' \
+            'Suites: noble noble-updates noble-security' 'Components: main universe' \
+            'Architectures: arm64' | sudo tee /etc/apt/sources.list.d/arm64-ports.sources
+          sudo apt-get update -q
+          sudo apt-get install -y -q libx11-dev:arm64 libxext-dev:arm64 libgl-dev:arm64 libegl-dev:arm64 \
+            libfontconfig-dev:arm64 libfreetype-dev:arm64
+      # Both architectures, because native/linux declares both and the toolchain resolves every
+      # platform a module declares.
+      - name: The core fork's Compose for Kotlin/Native Linux
+        uses: ./extended/ci/core-compose
+        with:
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          targets: linuxX64 linuxArm64
+      - name: Cache the Kotlin toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.konan
+            ~/.cache/JetBrains/Kotlin
+          key: kn-hello-linux-${{ env.CORE_EXTENDED_REF }}
+          restore-keys: kn-hello-linux-
+      # The sample becomes a module of the window project, with its links followed. The scene
+      # declares the JVM and macOS as well, whose Compose is not built here, so it is built as
+      # the Linux module it is for this executable; the sample is built for one architecture
+      # at a time.
+      - name: The sample as a module of the core fork's window project
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          set -euo pipefail
+          mkdir -p samples
+          cp -RL "$GITHUB_WORKSPACE/extended/native-desktop/hello-awtfree" samples/hello-awtfree
+          ls -la samples/hello-awtfree/src
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ linuxX64, linuxArm64 ]/m' scene/module.yaml
+          printf 'modules:\n  - common\n  - scene\n  - native/linux\n  - native/linux-scene\n  - samples/hello-awtfree\n' > project.yaml
+          cat project.yaml
+      - name: Build the executables
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          set -euo pipefail
+          for cell in linux-x64:linuxX64 linux-arm64:linuxArm64; do
+            name="${cell%%:*}"; platform="${cell#*:}"
+            perl -0pi -e "s/^  platforms: \\[.*\\]\$/  platforms: [ $platform ]/m" samples/hello-awtfree/module.yaml
+            grep -n '^  platforms:' samples/hello-awtfree/module.yaml
+            rm -rf build/tasks/*hello-awtfree*
+            ./kotlin build -m hello-awtfree -p "$platform"
+            exe="$(find build -type f -name '*.kexe' -path '*hello-awtfree*' | head -1)"
+            [[ -n "$exe" ]] || { echo "no executable under build/:" >&2; find build -name '*.kexe' >&2; exit 1; }
+            mkdir -p "$RUNNER_TEMP/kn-out-$name/hello-awtfree"
+            cp "$exe" "$RUNNER_TEMP/kn-out-$name/hello-awtfree/hello-awtfree"
+            file "$RUNNER_TEMP/kn-out-$name/hello-awtfree/hello-awtfree"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kn-hello-awtfree-linux-x64
+          path: ${{ runner.temp }}/kn-out-linux-x64
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kn-hello-awtfree-linux-arm64
+          path: ${{ runner.temp }}/kn-out-linux-arm64
+          retention-days: 3
+
+  # The gate the GraalVM cells run, on the Kotlin/Native executable, on its own architecture:
+  # one file, only the system's libraries, Korean laid out with no ICU data file, the Compose
+  # content presented at the window's size; then the window chrome and a screen reader.
+  kn-run:
+    needs: kn-build
+    name: One executable (Kotlin/Native, ${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-24.04 }
+          - { name: linux-arm64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: extended/native-image
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: extended/window/scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: kn-hello-awtfree-${{ matrix.name }}
+          path: ${{ runner.temp }}/kn-out
+      - name: Linux packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1 \
+            libx11-6 libxext6 libfontconfig1 libfreetype6 fonts-noto-cjk binutils gdb build-essential pkg-config \
+            openbox xdotool x11-utils dbus at-spi2-core libatspi2.0-dev
+          chmod +x "$RUNNER_TEMP/kn-out/hello-awtfree/hello-awtfree"
+      - name: Take every ICU data file off the runner
+        shell: bash
+        run: |
+          { find /usr /opt /Library /Applications /home /Users /snap -name 'icudtl.dat' 2>/dev/null || true; } |
+            while IFS= read -r file; do echo "removing $file"; sudo rm -f "$file"; done
+      - name: One file, system libraries only, Korean with no ICU data, run alone
+        shell: bash
+        run: |
+          xvfb-run -a -s '-screen 0 1280x1024x24' bash extended/native-image/check-one-executable.sh \
+            "$RUNNER_TEMP/kn-out/hello-awtfree" "$RUNNER_TEMP/one-executable"
+      - name: Window chrome and a reader (openbox and at-spi2, under a virtual display)
+        shell: bash
+        run: |
+          bash extended/native-image/check-linux-chrome.sh "$RUNNER_TEMP/kn-out/hello-awtfree/hello-awtfree" \
+            core-extended "$RUNNER_TEMP/chrome"
       - name: Keep the self-check drawing
         if: always()
         uses: actions/upload-artifact@v4

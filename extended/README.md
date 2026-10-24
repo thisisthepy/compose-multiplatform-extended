@@ -343,8 +343,8 @@ The plugin is published under this fork's own name, so that it can sit beside Je
   `-ext.<N>-dev` for a local build. The probes and samples use `1.11.1-ext.1-dev`.
 - the aliases (`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` and the rest)
   resolve to compose-multiplatform-core-extended's `org.thisisthepy.compose.*` libraries at
-  `-Pcompose.version` (`1.11.1-ext.1`) and `-Pcompose.material3.version`
-  (`1.11.0-alpha07-ext.1`). `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
+  `-Pcompose.version` and `-Pcompose.material3.version` (`1.11.1-ext.1`).
+  `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
   coordinate too.
 - the components and Compose HTML stay JetBrains', at the upstream version (`1.11.1`), because
   the core fork does not build them.

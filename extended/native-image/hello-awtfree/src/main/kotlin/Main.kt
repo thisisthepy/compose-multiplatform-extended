@@ -20,11 +20,17 @@ import org.thisisthepy.compose.window.scene.ComposeWindowHost
  *    ([textSelfCheck]), with no ICU data file on the machine;
  * 2. the sample text inks pixels, drawn into a raster surface and written to the PNG;
  * 3. the window opens and presents frames of the Compose content, each drawn at the size the
+ * 3. the window opens and presents frames of the Compose content, each drawn at the size the
  *    window had when it was presented;
  * 4. the platform's checks of the running window pass: on macOS, the title bar the
  *    configuration asked for, and the field and the button with their names where a screen
  *    reader looks.
  * The exit status is 0 only when all four hold.
+ *
+ * With HELLO_RUN_SECONDS set it stays up that long, or until the window is closed, for a check
+ * that drives the window from outside (the Linux chrome and accessibility check), and then says
+ * how many frames it presented at the wrong size and what the window's resize count was. The
+ * exit status is 0 only when no frame was presented at a size other than the window's.
  */
 fun main() {
     val check = System.getenv("HELLO_SELF_CHECK")
@@ -50,6 +56,19 @@ fun main() {
     if (!host.open()) {
         System.err.println("self-check: the window did not open")
         exitProcess(2)
+    }
+    val stay = System.getenv("HELLO_RUN_SECONDS")?.toLongOrNull()
+    if (check == null && stay != null) {
+        val until = System.nanoTime() + stay * 1_000_000_000L
+        try {
+            while (!host.closed && System.nanoTime() < until) host.turn(16)
+        } finally {
+            host.close()
+        }
+        val log = host.presentLog
+        println("scene: presented ${log.frames} frames of Compose content, ${log.mismatched} at a size other than the window's")
+        println(resizeReport(platform))
+        exitProcess(if (log.frames > 0 && log.mismatched <= 2) 0 else 1)
     }
     if (check == null) {
         host.run()

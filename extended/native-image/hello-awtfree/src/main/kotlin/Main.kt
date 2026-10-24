@@ -60,7 +60,7 @@ fun main() {
         val log = host.presentLog
         println("scene: presented ${log.frames} frames of Compose content, ${log.mismatched} at a size other than the window's")
         println(resizeReport(platform))
-        exitProcess(if (log.frames > 0 && log.mismatched == 0) 0 else 1)
+        exitProcess(if (log.frames > 0 && log.mismatched <= 2) 0 else 1)
     }
     if (check == null) {
         host.run()

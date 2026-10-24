@@ -128,7 +128,7 @@ jobs:
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }} -Pcompose.material3.version=${{ env.COMPOSE_VERSION }}
       - name: createDistributable
         working-directory: extended/samples/hello-jvm
         run: ./gradlew --no-daemon createDistributable
@@ -342,7 +342,7 @@ jobs:
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }} -Pcompose.material3.version=${{ env.COMPOSE_VERSION }}
 
       # The AwtFree sample: packageNativeImage with the no-JAWT archive and the window layer.
       - name: packageNativeImage (AwtFree sample)

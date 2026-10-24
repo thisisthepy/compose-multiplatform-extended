@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: fcc18659834c343cf60181919de0d96ad513919f
+  CORE_EXTENDED_REF: fd733c8395f32eb42ae9289230554dbdaebffad9
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
   # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
@@ -180,11 +180,15 @@ jobs:
         run: |
           perl -0pi -e 's/^  platforms: \[ jvm, macosArm64 \]$/  platforms: [ jvm ]/m' scene/module.yaml
           grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' common/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' common/module.yaml
       - name: Publish the window modules to mavenLocal
         shell: bash
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          mkdir -p ~/.cache/JetBrains/Kotlin/download.cache
+          curl -fsSL -o ~/.cache/JetBrains/Kotlin/download.cache/bd467c5b70-OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" || true
           cp project.yaml project.yaml.all
           printf 'modules:\n' > project.yaml
           for m in common scene graalvm/graalvm-macos graalvm/graalvm-linux; do printf '  - %s\n' "$m" >> project.yaml; done
@@ -249,7 +253,7 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends \
             build-essential pkg-config xvfb xauth libgl1-mesa-dev libegl-dev libgl1-mesa-dri \
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
-            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb
+            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb strace
 
       - name: GraalVM 25 (Liberica NIK, or upstream where the cell names it)
         shell: bash
@@ -298,12 +302,23 @@ jobs:
         run: |
           perl -0pi -e 's/^  platforms: \[ jvm, macosArm64 \]$/  platforms: [ jvm ]/m' scene/module.yaml
           grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' common/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' common/module.yaml
       - name: Publish the window modules to mavenLocal
         if: runner.os == 'macOS'
         shell: bash
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          if [ "$RUNNER_OS" = macOS ]; then
+            cache="$HOME/Library/Caches/JetBrains/Kotlin/download.cache"
+            mkdir -p "$cache"
+            curl -fsSL -o "$cache/f8362503fc-OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.5_8.tar.gz" "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.5_8.tar.gz" || true
+          elif [ "$RUNNER_OS" = Linux ]; then
+            cache="$HOME/.cache/JetBrains/Kotlin/download.cache"
+            mkdir -p "$cache"
+            curl -fsSL -o "$cache/bd467c5b70-OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" || true
+          fi
           # The module lists are core-extended's own extended-window-publish matrix.
           # The samples link the GraalVM window layers, and hello-awtfree hosts a scene in them.
           # native/macos is the Kotlin/Native window and compiles against the core fork's
@@ -426,6 +441,19 @@ jobs:
           else
             bash extended/native-image/check-one-executable.sh "$out" "$RUNNER_TEMP/one-executable"
           fi
+      # Said here rather than left out: an application built from source with this plugin needs a
+      # JDK on the machine that builds it, because Gradle, the Kotlin compiler and native-image
+      # all run on one. Needing nothing but the platform's linker holds only where the renderer
+      # arrives already built, as compose-rust's does (its build script downloads it); it cannot
+      # hold for this build, so this gate does not check it.
+      - name: What this gate does not check, and why
+        shell: bash
+        run: |
+          echo "The executable checked above needs no Java runtime to run. Building it did need one:"
+          echo "  java: $(java -version 2>&1 | head -1)"
+          echo "  native-image: $("$GRAALVM_HOME/bin/native-image" --version 2>&1 | head -1)"
+          echo "A build that needs only the platform's linker is one whose renderer arrives prebuilt."
+
       - name: Keep the self-check drawing
         if: always()
         uses: actions/upload-artifact@v4

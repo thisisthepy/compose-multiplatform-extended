@@ -150,7 +150,12 @@ syllable whole, lines broken between words), draws it into a PNG, and presents f
 Compose content in its window, none at a size other than the window's. `hello-awtfree` is a
 Compose application with no AWT: the core fork's scene module hosts its content in the GraalVM
 window, through the window's own surface (`appKitWindowSurface`, `x11WindowSurface`). A run
-that does not end within 120 s is stopped with every thread's stack printed.
+that does not end within 120 s is stopped with every thread's stack printed. It then runs the
+executable once more, watched (every file it touches on Linux, through `strace`; every library
+it loads on macOS, through `DYLD_PRINT_LIBRARIES`), and fails if it looks for a Java runtime:
+anything under the JDK or GraalVM on the runner, a module image, `jvm.cfg`, `libjvm` or
+`libjava`. What the gate does not check is the build machine: building from source needs a JDK,
+for Gradle, the Kotlin compiler and native-image, and the gate says so in a step of its own.
 An executable that needs an ICU data file shows it there: a double click would select one
 syllable, and lines would wrap inside words.
 

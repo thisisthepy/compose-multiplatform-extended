@@ -523,7 +523,7 @@ jobs:
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
-          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm, macosArm64 ]/m' scene/module.yaml
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ macosArm64 ]/m' scene/module.yaml
           cp project.yaml project.yaml.all
           printf 'modules:\n  - common\n  - scene\n  - native/macos\n' > project.yaml
           ./kotlin publish mavenLocal

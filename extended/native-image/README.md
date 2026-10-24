@@ -159,6 +159,24 @@ for Gradle, the Kotlin compiler and native-image, and the gate says so in a step
 An executable that needs an ICU data file shows it there: a double click would select one
 syllable, and lines would wrap inside words.
 
+On macOS the gate also checks the window as a screen reader meets it, and runs the executable
+twice, with `HELLO_TITLE_BAR` unset (the Normal title bar) and set to `Simple`. Each run walks
+its own accessibility elements in process, through the objects AppKit's accessibility server
+answers every client from, because a hosted runner has not trusted any process for
+accessibility and an outside client is refused there. The run prints what the system's API
+answered an outside client, with its error number (`kAXErrorAPIDisabled`, -25211, on a runner
+that has not granted the trust). It fails unless the three system buttons are there, the content
+runs under the title bar, no title text is drawn, the caption's height and button room match the
+buttons' own frames, the corner radius is the core fork's measured table for that style and
+release, and the field and the button are found by their roles and names. On macOS 26 the
+Normal title bar's buttons must sit further in than the Simple one's.
+
+The "One executable (Kotlin/Native, <os>)" jobs run the same gate on
+`extended/native-desktop/hello-awtfree-kn`: the same content (`hello-awtfree/src/shared`) in the
+core fork's Kotlin/Native window (`native-macos`), linked by Gradle with the native desktop
+plugin against the core fork's `macosArm64` Compose, with no JVM. The macOS cell is there; the
+Linux cells come with the Linux window, and Windows after it.
+
 Measured by the gate, run 39028163166 (2026-10-17, NIK 25.0.4.1), before `hello-awtfree` hosted
 a Compose scene: it is one
 executable of 37.62 MB on macOS arm64, 46.27 MB on Linux x64 and 44.96 MB on Linux arm64, naming

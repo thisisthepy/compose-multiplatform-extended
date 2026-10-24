@@ -235,4 +235,34 @@ done <<< "$accessed"
 [[ -z "$found" ]] || fail "running the executable looked for a Java runtime or a library of its own" "$found"
 echo "-- run watched ($( [[ "$os" == macos ]] && echo "every library loaded" || echo "every file accessed")): $(wc -l <<< "$accessed" | tr -d ' ') paths, none in a Java runtime"
 
+# 6. On macOS, the title bar and what a screen reader is told, for both title bar styles: the
+# report above is the Normal one, and the executable runs once more with the Simple title bar.
+if [[ "$os" == macos ]]; then
+    grep -q '^chrome: ok (Normal)' "$log" ||
+        fail "the Normal title bar is not the one the configuration asked for" "Its own report is above."
+    grep -q '^accessibility: ok' "$log" ||
+        fail "a screen reader does not find the field and the button by their names" "Its own report is above."
+    simple="$scratch/run-simple"
+    simple_log="$scratch/run-simple.log"
+    mkdir -p "$simple"
+    cp "$binary" "$simple/$name"
+    simple_status=0
+    ( cd "$simple" && HELLO_TITLE_BAR=Simple HELLO_SELF_CHECK="$scratch/self-check-simple.png" \
+        perl -e 'alarm 120; exec @ARGV' "./$name" ) > "$simple_log" 2>&1 || simple_status=$?
+    echo "== the application's own report, with the Simple title bar"
+    cat "$simple_log"
+    grep -q '^chrome: ok (Simple)' "$simple_log" ||
+        fail "the Simple title bar is not the one the configuration asked for" "Its own report is above."
+    [[ "$simple_status" -eq 0 ]] || fail "the Simple run did not end on its own (exit $simple_status)"
+    inset() { sed -n 's/.*close button inset \([0-9.]*\) pt, macOS \([0-9]*\).*/\1 \2/p' "$1" | head -1; }
+    read -r normal_inset major <<< "$(inset "$log")"
+    read -r simple_inset _ <<< "$(inset "$simple_log")"
+    echo "-- close button inset: Normal ${normal_inset:-?} pt, Simple ${simple_inset:-?} pt, macOS ${major:-?}"
+    # macOS 26 sets a unified toolbar window's buttons further in; earlier releases do not.
+    if [[ "${major:-0}" -ge 26 ]]; then
+        awk -v n="${normal_inset:-0}" -v s="${simple_inset:-0}" 'BEGIN { exit !(n > s) }' ||
+            fail "the Normal title bar's buttons are not set further in than the Simple one's on macOS $major"
+    fi
+fi
+
 echo "ok    $name is one executable: system libraries only, Korean laid out with no ICU data file"

@@ -23,7 +23,7 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: feb1e4c595debbe28a015cdd11a30f4713068bf4
+  CORE_EXTENDED_REF: fd733c8395fb24d107752a56d6893f486e46a62a
   # The plugin as a local development build, asking for the core fork's Compose at its own
   # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
   # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
@@ -128,7 +128,7 @@ jobs:
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }} -Pcompose.material3.version=${{ env.COMPOSE_VERSION }}
       - name: createDistributable
         working-directory: extended/samples/hello-jvm
         run: ./gradlew --no-daemon createDistributable
@@ -224,8 +224,7 @@ jobs:
           - name: linux-arm64
             os: ubuntu-24.04-arm
             nik: vm-openjdk25.0.4.1+2-25.0.4.1+1-linux-aarch64
-          # The Kotlin/Native cells are the kn-* jobs below: their build is the core fork's
-          # toolchain, not packageNativeImage.
+          # The Kotlin/Native cells are the package-kn and kn-* jobs below.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 240
     env:
@@ -343,7 +342,7 @@ jobs:
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }} -Pcompose.material3.version=${{ env.COMPOSE_VERSION }}
 
       # The AwtFree sample: packageNativeImage with the no-JAWT archive and the window layer.
       - name: packageNativeImage (AwtFree sample)
@@ -482,6 +481,102 @@ jobs:
           path: |
             extended/native-image/*/build/tmp/packageNativeImage/**/*.log
             extended/native-image/*/build/reports/
+          if-no-files-found: ignore
+
+  # The same gate for a Kotlin/Native executable: hello-awtfree's content in the core fork's
+  # Kotlin/Native window (native-macos), linked by Gradle with the native desktop plugin against
+  # the core fork's macosArm64 Compose, then checked as the GraalVM images are. Linux cells join
+  # this matrix with the Linux window; Windows comes later.
+  package-kn:
+    name: One executable (Kotlin/Native, ${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-26
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    env:
+      SAMPLE_KN: extended/native-desktop/hello-awtfree-kn
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: extended/window
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Built once per CORE_EXTENDED_REF and restored from the cache after that.
+      - name: The core fork's Compose for macosArm64
+        uses: ./extended/ci/core-compose
+        with:
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          targets: macosArm64
+
+      - name: Cache the Kotlin toolchain and konan
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/JetBrains/Kotlin
+            ~/.konan
+          key: kn-window-${{ matrix.name }}-${{ env.CORE_EXTENDED_REF }}-${{ hashFiles('extended/native-desktop/hello-awtfree-kn/*.kts') }}
+          restore-keys: |
+            kn-window-${{ matrix.name }}-
+
+      - name: Publish the Kotlin/Native window modules to mavenLocal
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          set -euo pipefail
+          cp project.yaml project.yaml.all
+          printf 'modules:\n  - common\n  - native/macos\n' > project.yaml
+          ./kotlin publish mavenLocal
+          cp project.yaml.all project.yaml
+          find ~/.m2/repository/org/thisisthepy/compose/window -name '*.module' | sort
+
+      - name: The native desktop plugin to mavenLocal
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon --console=plain :kotlin-native-desktop:publishToMavenLocal -Pdeploy.version=0.1.0-extended-dev
+
+      - name: Link the Kotlin/Native sample
+        working-directory: ${{ env.SAMPLE_KN }}
+        run: ./gradlew --no-daemon --console=plain linkReleaseExecutableMacosArm64
+
+      - name: Stage the executable alone
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/kn-out"
+          cp "$SAMPLE_KN/build/bin/macosArm64/releaseExecutable/hello-awtfree-kn.kexe" "$RUNNER_TEMP/kn-out/hello-awtfree-kn"
+          otool -l "$RUNNER_TEMP/kn-out/hello-awtfree-kn" | grep -A 2 LC_RPATH | awk '/path /{print $2}' | while read -r rpath; do
+            install_name_tool -delete_rpath "$rpath" "$RUNNER_TEMP/kn-out/hello-awtfree-kn"
+          done
+          ls -la "$RUNNER_TEMP/kn-out"
+
+      - name: Take every ICU data file off the runner
+        shell: bash
+        run: |
+          { find /usr /opt /Library /Applications /Users -name 'icudtl.dat' 2>/dev/null || true; } |
+            while IFS= read -r file; do echo "removing $file"; sudo rm -f "$file"; done
+
+      - name: One file, system libraries only, Korean with no ICU data, run alone
+        shell: bash
+        run: bash extended/native-image/check-one-executable.sh "$RUNNER_TEMP/kn-out" "$RUNNER_TEMP/one-executable"
+
+      - name: Keep the self-check drawing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-executable-kn-${{ matrix.name }}
+          path: ${{ runner.temp }}/one-executable/*.png
           if-no-files-found: ignore
 
   # The same application as a Kotlin/Native executable for Linux: the content of hello-awtfree

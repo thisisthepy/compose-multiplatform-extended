@@ -5,6 +5,7 @@ import kotlin.system.exitProcess
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Surface
+import org.thisisthepy.compose.window.TitleBarStyle
 import org.thisisthepy.compose.window.WindowConfig
 import org.thisisthepy.compose.window.scene.ComposeWindowHost
 
@@ -19,8 +20,12 @@ import org.thisisthepy.compose.window.scene.ComposeWindowHost
  *    ([textSelfCheck]), with no ICU data file on the machine;
  * 2. the sample text inks pixels, drawn into a raster surface and written to the PNG;
  * 3. the window opens and presents frames of the Compose content, each drawn at the size the
- *    window had when it was presented.
- * The exit status is 0 only when all three hold.
+ * 3. the window opens and presents frames of the Compose content, each drawn at the size the
+ *    window had when it was presented;
+ * 4. the platform's checks of the running window pass: on macOS, the title bar the
+ *    configuration asked for, and the field and the button with their names where a screen
+ *    reader looks.
+ * The exit status is 0 only when all four hold.
  *
  * With HELLO_RUN_SECONDS set it stays up that long, or until the window is closed, for a check
  * that drives the window from outside (the Linux chrome and accessibility check), and then says
@@ -38,10 +43,13 @@ fun main() {
         System.err.println("self-check: main is not on the process's first thread, which the window's calls need")
         exitProcess(3)
     }
+    // HELLO_TITLE_BAR=Simple opens the window with the plain title bar; the default is Normal.
+    val titleBar = if (System.getenv("HELLO_TITLE_BAR") == "Simple") TitleBarStyle.Simple else TitleBarStyle.Normal
     val platform = newPlatform()
+    val config = WindowConfig("안녕하세요, AwtFree", 520, 360, minWidth = 240, minHeight = 160, titleBar = titleBar)
     val host = ComposeWindowHost(
         platform = platform,
-        config = WindowConfig("안녕하세요, AwtFree", 520, 360, minWidth = 240, minHeight = 160),
+        config = config,
         surfaceFor = ::newSurface,
         content = { Content() },
     )
@@ -74,6 +82,9 @@ fun main() {
             host.requestFrame()
             host.turn(16)
         }
+        // 4. What the platform's own checks say about the running window: on macOS the title
+        // bar and what a screen reader is told (platformChecks in Platform.kt).
+        if (!host.closed && !platformChecks(host, platform, config)) ok = false
     } finally {
         host.close()
     }

@@ -1,0 +1,1 @@
+../../../../../native-image/hello-awtfree/src/main/kotlin/TextSelfCheck.kt

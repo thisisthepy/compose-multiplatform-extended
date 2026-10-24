@@ -16,8 +16,8 @@ sourceSets.main {
 }
 
 dependencies {
-    implementation("org.thisisthepy.compose.window:common:0.1.0")
-    implementation("org.thisisthepy.compose.window:$windowArtifact:0.1.0")
+    implementation("org.thisisthepy.compose.window:common:1.11.1-ext.1")
+    implementation("org.thisisthepy.compose.window:$windowArtifact:1.11.1-ext.1")
     // skiko is linked into every image this plugin makes; the sample draws nothing with it.
     implementation(compose.desktop.currentOs)
     // skiko-awt with the AWT switch, from compose-multiplatform-core-extended's

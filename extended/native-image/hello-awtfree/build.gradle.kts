@@ -18,10 +18,10 @@ sourceSets.main {
 }
 
 dependencies {
-    implementation("org.thisisthepy.compose.window:common:0.1.0")
-    implementation("org.thisisthepy.compose.window:$windowArtifact:0.1.0")
+    implementation("org.thisisthepy.compose.window:common:1.11.1-ext.1")
+    implementation("org.thisisthepy.compose.window:$windowArtifact:1.11.1-ext.1")
     // The scene host, and the core fork's foundation the content is written with.
-    implementation("org.thisisthepy.compose.window:scene:0.1.0")
+    implementation("org.thisisthepy.compose.window:scene:1.11.1-ext.1")
     implementation(compose.foundation)
     // @CFunction, to ask the system which thread main runs on.
     compileOnly("org.graalvm.sdk:nativeimage:25.0.1")

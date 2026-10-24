@@ -31,7 +31,7 @@ local Maven repository first, as development builds, which is what the probe wor
     -Pjetbrains.publication.libraries=COMPOSE,COMPOSE_MATERIAL3 -Pextended.publication.dev=true
 # in gradle-plugins
 ./gradlew :compose:publishToMavenLocal -Pdeploy.version=1.11.1-ext.1-dev \
-    -Pcompose.version=1.11.1-ext.1-dev -Pcompose.material3.version=1.11.0-alpha07-ext.1-dev
+    -Pcompose.version=1.11.1-ext.1-dev -Pcompose.material3.version=1.11.1-ext.1-dev
 ```
 
 The agent writes its metadata on a clean exit, so close the application rather than kill

@@ -9,8 +9,9 @@
 #   <output directory>   build/compose/native-image/<name>, as packageNativeImage writes it
 #   <scratch directory>  emptied first; the executable runs from a directory inside it
 #
-# The application has to be one that runs the text self-check with HELLO_SELF_CHECK set,
-# printing "text self-check: ok", as extended/native-image/hello-awtfree does.
+# The application has to be one that runs the self-check with HELLO_SELF_CHECK set, as
+# extended/native-image/hello-awtfree does: "text self-check: ok", the inked pixel count, and the
+# frames of Compose content it presented.
 #
 # Needs a display. On Linux run it under `xvfb-run -a`. On Windows run it from Git Bash with
 # the MSVC tools (dumpbin) on PATH.
@@ -27,7 +28,9 @@ fi
 fail() {
     echo "fail  $1" >&2
     shift
-    for line in "$@"; do echo "      $line" >&2; done
+    for arg in "$@"; do
+        while IFS= read -r line; do [[ -n "$line" ]] && echo "      $line" >&2; done <<< "$arg"
+    done
     exit 1
 }
 
@@ -148,10 +151,28 @@ ls -la "$scratch/run"
 log="$scratch/run.log"
 png="$scratch/self-check.png"
 status=0
-case "$os" in
-    macos) ( cd "$scratch/run" && HELLO_SELF_CHECK="$png" perl -e 'alarm 120; exec @ARGV' "./$name" ) > "$log" 2>&1 || status=$? ;;
-    *) ( cd "$scratch/run" && HELLO_SELF_CHECK="$png" timeout 120 "./$name" ) > "$log" 2>&1 || status=$? ;;
-esac
+hang="$scratch/hang.txt"
+# Started in the background and watched, so that a run which never ends is stopped with the
+# stacks of every thread printed: the macOS window has hung intermittently on the hosted runner
+# after the text check, and a hang that only says "timed out" cannot be traced.
+( cd "$scratch/run" && HELLO_SELF_CHECK="$png" exec "./$name" ) > "$log" 2>&1 &
+pid=$!
+for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+if kill -0 "$pid" 2>/dev/null; then
+    case "$os" in
+        macos) sample "$pid" 3 -file "$hang" > /dev/null 2>&1 || true ;;
+        linux) command -v gdb > /dev/null &&
+            gdb -p "$pid" -batch -ex 'thread apply all bt' > "$hang" 2>&1 || true ;;
+        windows) : ;;
+    esac
+    kill -9 "$pid" 2> /dev/null || true
+    wait "$pid" 2> /dev/null || true
+    echo "== the application's own report (it was still running after 120 s and was stopped)"
+    cat "$log"
+    if [[ -s "$hang" ]]; then echo "== its threads when it was stopped"; cat "$hang"; fi
+    fail "the executable did not end on its own within 120 s" "Its report and its threads are above."
+fi
+wait "$pid" || status=$?
 echo "== the application's own report"
 cat "$log"
 [[ "$(ls -A "$scratch/run")" == "$name" ]] || fail "the executable left files beside itself" "$(ls -A "$scratch/run")"
@@ -159,11 +180,89 @@ grep -q "text self-check: ok" "$log" ||
     fail "the executable did not lay Korean text out correctly with no ICU data file" "Its own report is above."
 grep -q "inked [1-9][0-9]* pixels" "$log" || fail "the executable did not say it drew the sample text" "Its own report is above."
 [[ -s "$png" ]] || fail "the executable drew no PNG at $png"
+# The application hosts a Compose scene in its window and says how many frames it presented
+# and how many were drawn at a size other than the window's: some, and none.
+grep -qE '^scene: presented [1-9][0-9]* frames of Compose content, 0 at a size' "$log" ||
+    fail "the Compose scene presented no frames, or some at the wrong size" "Its own report is above."
 # A Java exception the application survived is still a lookup the image is missing (JNI or
 # reflection metadata), and it would fail somewhere a user is watching.
 if grep -E '^(java|kotlin|org)\.[A-Za-z0-9_.$]*(Exception|Error)\b' "$log"; then
     fail "the executable reported an exception, which the image's metadata has to cover" "Its own report is above."
 fi
 [[ "$status" -eq 0 ]] || fail "the executable did not run to the end on its own (exit $status)"
+
+# 5. A native image carries its own runtime, so running it must not look for a Java one: no file
+# under a JDK or GraalVM, no module image, no jvm.cfg, no libjvm or libjava loaded. Run once more,
+# alone, watched: every file access on Linux (strace), every library loaded on macOS (dyld).
+runtime_log="$scratch/runtime.log"
+case "$os" in
+    linux)
+        command -v strace > /dev/null || fail "strace is not installed" "It is how the run is watched for a Java runtime."
+        ( cd "$scratch/run" && HELLO_SELF_CHECK="$scratch/again.png" timeout 120 \
+            strace -f -qq -e trace=file -o "$runtime_log" "./$name" ) > /dev/null 2>&1 || true
+        accessed="$(sed -n 's/.*"\(\/[^"]*\)".*/\1/p' "$runtime_log" | sort -u)"
+        ;;
+    macos)
+        ( cd "$scratch/run" && HELLO_SELF_CHECK="$scratch/again.png" DYLD_PRINT_LIBRARIES=1 exec "./$name" ) > "$runtime_log" 2>&1 &
+        pid=$!
+        for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        else
+            wait "$pid" 2>/dev/null || true
+        fi
+        accessed="$(sed -n 's/^dyld\[[0-9]*\]: <[^>]*> //p; s/^dyld\[[0-9]*\]: //p' "$runtime_log" | awk '{print $1}' | sort -u)"
+        ;;
+    windows) accessed="" ;;
+esac
+[[ "$os" == windows || -n "$accessed" ]] || fail "watching the run recorded nothing, so it proves nothing" "$(tail -5 "$runtime_log")"
+java_paths=()
+for home in "${GRAALVM_HOME:-}" "${JAVA_HOME:-}"; do [[ -n "$home" ]] && java_paths+=("$home"); done
+found=""
+while IFS= read -r path; do
+    [[ -n "$path" && "$path" == /* ]] || continue
+    case "$path" in
+        */lib/modules|*/jvm.cfg|*/libjvm.*|*/libjava.*|*/conf/security/java.security) found+="$path"$'\n'; continue ;;
+    esac
+    for home in "${java_paths[@]+"${java_paths[@]}"}"; do
+        [[ "$path" == "$home"/* ]] && found+="$path"$'\n'
+    done
+    if [[ "$os" == macos ]]; then
+        case "$path" in /usr/lib/*|/System/*) ;; *) [[ "$path" == "$scratch/run/$name" ]] || found+="$path (a library outside the system)"$'\n' ;; esac
+    fi
+done <<< "$accessed"
+[[ -z "$found" ]] || fail "running the executable looked for a Java runtime or a library of its own" "$found"
+echo "-- run watched ($( [[ "$os" == macos ]] && echo "every library loaded" || echo "every file accessed")): $(wc -l <<< "$accessed" | tr -d ' ') paths, none in a Java runtime"
+
+# 6. On macOS, the title bar and what a screen reader is told, for both title bar styles: the
+# report above is the Normal one, and the executable runs once more with the Simple title bar.
+if [[ "$os" == macos ]]; then
+    grep -q '^chrome: ok (Normal)' "$log" ||
+        fail "the Normal title bar is not the one the configuration asked for" "Its own report is above."
+    grep -q '^accessibility: ok' "$log" ||
+        fail "a screen reader does not find the field and the button by their names" "Its own report is above."
+    simple="$scratch/run-simple"
+    simple_log="$scratch/run-simple.log"
+    mkdir -p "$simple"
+    cp "$binary" "$simple/$name"
+    simple_status=0
+    ( cd "$simple" && HELLO_TITLE_BAR=Simple HELLO_SELF_CHECK="$scratch/self-check-simple.png" \
+        perl -e 'alarm 120; exec @ARGV' "./$name" ) > "$simple_log" 2>&1 || simple_status=$?
+    echo "== the application's own report, with the Simple title bar"
+    cat "$simple_log"
+    grep -q '^chrome: ok (Simple)' "$simple_log" ||
+        fail "the Simple title bar is not the one the configuration asked for" "Its own report is above."
+    [[ "$simple_status" -eq 0 ]] || fail "the Simple run did not end on its own (exit $simple_status)"
+    inset() { sed -n 's/.*close button inset \([0-9.]*\) pt, macOS \([0-9]*\).*/\1 \2/p' "$1" | head -1; }
+    read -r normal_inset major <<< "$(inset "$log")"
+    read -r simple_inset _ <<< "$(inset "$simple_log")"
+    echo "-- close button inset: Normal ${normal_inset:-?} pt, Simple ${simple_inset:-?} pt, macOS ${major:-?}"
+    # macOS 26 sets a unified toolbar window's buttons further in; earlier releases do not.
+    if [[ "${major:-0}" -ge 26 ]]; then
+        awk -v n="${normal_inset:-0}" -v s="${simple_inset:-0}" 'BEGIN { exit !(n > s) }' ||
+            fail "the Normal title bar's buttons are not set further in than the Simple one's on macOS $major"
+    fi
+fi
 
 echo "ok    $name is one executable: system libraries only, Korean laid out with no ICU data file"

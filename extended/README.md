@@ -118,8 +118,9 @@ for command line programs.
   applications with a Compose window, in all three outputs above. A Kotlin/Native window app is
   packaged. It handles the command line outputs too. See [The Gradle plugin](#the-gradle-plugin).
 - **Kotlin/Native desktop for command line programs**, `org.thisisthepy.kotlin.native.desktop`:
-  no Compose and no window. **Status: open**, in
-  [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31). The id follows the Kotlin build tooling's naming
+  no Compose and no window. **Status: done**, from
+  [#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31)
+  (`extended/kotlin-native-desktop`). The id follows the Kotlin build tooling's naming
   (`org.jetbrains.kotlin.native.cocoapods` maps to `org.thisisthepy.kotlin.native.<feature>`).
   Owner, 2026-10-05: [user] "두번째 플러그인은 패키지명 kotlin 빌드도구쪽이랑 맞춰".
 
@@ -188,10 +189,14 @@ MinGW-only path. The owner decided this on 2026-10-05:
 Install Visual Studio Build Tools with the MSVC toolset v14.51 or later, `clang-cl` and the
 Windows SDK. The GraalVM native image on Windows has the same toolset requirement (below).
 
-**Status: open** for Kotlin/Native. The MSVC link step for `mingwX64` is in
-[#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31), and the check that finds the
-tools at the start of the build and stops with an install message when one is missing is in
-[#26](https://github.com/thisisthepy/compose-multiplatform-extended/pull/26). Neither is on `extended` yet.
+**Status: done** for Kotlin/Native, from
+[#31](https://github.com/thisisthepy/compose-multiplatform-extended/pull/31):
+`org.thisisthepy.kotlin.native.desktop` links every `mingwX64` executable with MSVC, finds the
+tools at the start of the build and stops with an install message when one is missing, and
+links the MSVC half a library publishes beside its klib (skiko for mingwX64, with Skia and
+its ICU data compiled in), so the program is one file. The `extended-kotlin-msvc` workflow
+links and runs a program with it on Windows, and the core fork's `extended-publish-local`
+workflow links and runs a Compose program from the published repository alone.
 
 ### macOS signing and notarization
 
@@ -229,9 +234,14 @@ per platform, with what was measured:
 
 ### Requirements
 
-- **GraalVM: Liberica NIK 25 Full.** The image links the JDK's AWT statically, and only a
-  distribution that ships the JDK's static archives can do that. The task stops with that
-  reason when they are missing. Measured with NIK 25.0.4.1.
+- **GraalVM, by windowing.** With `windowing = Awt`, Liberica NIK 25 Full: the image links the
+  JDK's AWT statically, and only a distribution that ships the JDK's static archives can do
+  that. The task stops with that reason when they are missing. Measured with NIK 25.0.4.1.
+  With `windowing = AwtFree` on macOS, upstream GraalVM 25 (`graalvm-community-jdk-25`): the
+  AppKit window takes its calls on the process's first thread, so `main` has to run there,
+  and Liberica NIK runs `main` on a new thread on macOS whatever `-H:-RunMainInNewThread` says.
+  The image it builds would hang at its first window call, so the task refuses NIK there
+  before building, and says which GraalVM to use. On Linux either one works.
 - **The static skiko archive**, from `extended/skiko/build-skiko-static-jvm.sh` in
   compose-multiplatform-core-extended, built on the same system. A single executable cannot
   load Skia from a file.
@@ -333,8 +343,8 @@ The plugin is published under this fork's own name, so that it can sit beside Je
   `-ext.<N>-dev` for a local build. The probes and samples use `1.11.1-ext.1-dev`.
 - the aliases (`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` and the rest)
   resolve to compose-multiplatform-core-extended's `org.thisisthepy.compose.*` libraries at
-  `-Pcompose.version` (`1.11.1-ext.1`) and `-Pcompose.material3.version`
-  (`1.11.0-alpha07-ext.1`). `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
+  `-Pcompose.version` and `-Pcompose.material3.version` (`1.11.1-ext.1`).
+  `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
   coordinate too.
 - the components and Compose HTML stay JetBrains', at the upstream version (`1.11.1`), because
   the core fork does not build them.

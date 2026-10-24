@@ -23,9 +23,10 @@ permissions:
 env:
   # thisisthepy/compose-multiplatform-core-extended, the commit the window modules and
   # extended/skiko come from.
-  CORE_EXTENDED_REF: afda8fae507702c6e0cea49d0fa7108b8c8608e6
+  CORE_EXTENDED_REF: fd733c8395fb24d107752a56d6893f486e46a62a
   # The plugin as a local development build, asking for the core fork's Compose at its own
-  # version. The core fork's Compose is built from CORE_EXTENDED_REF (.github/actions/core-compose).
+  # version. The core fork's desktop Compose is built once from CORE_EXTENDED_REF, by the
+  # core-compose job (extended/ci/core-compose), and handed to the jobs that need it.
   PLUGIN_VERSION: 1.11.1-ext.1-dev
   COMPOSE_VERSION: 1.11.1-ext.1
   NIK_BASE: https://github.com/bell-sw/LibericaNIK/releases/download/25.0.4.1+1-25.0.4.1+2
@@ -68,7 +69,36 @@ jobs:
 
   # The plain JVM way to ship, built and started standalone. Independent of the native-image
   # cells below, so a JVM regression is not hidden behind a native-image one.
+  # The core fork's Compose for the desktop JVM, built once on Linux x64 and handed to every job
+  # below as an artifact: the jars are the same on every system, and Compose's Gradle build does
+  # not run on a Linux arm64 host.
+  core-compose:
+    name: The core fork's desktop Compose
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: extended/ci
+      - name: Make room for the Compose build
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell \
+            /usr/local/lib/node_modules /usr/local/julia* /opt/microsoft /opt/google
+          df -h /
+      - name: The core fork's Compose for the desktop
+        uses: ./extended/ci/core-compose
+        with:
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          targets: desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-compose-desktop
+          path: ~/.m2/repository/org/thisisthepy/compose
+          retention-days: 7
+
   jvm:
+    needs: core-compose
     name: JVM hello (${{ matrix.name }})
     strategy:
       fail-fast: false
@@ -91,14 +121,14 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends xvfb xauth libgl1-mesa-dri libxtst6 libxrender1 libxi6 fonts-noto-cjk binutils fakeroot
 
       - name: The core fork's Compose for the desktop
-        uses: ./.github/actions/core-compose
+        uses: actions/download-artifact@v4
         with:
-          ref: ${{ env.CORE_EXTENDED_REF }}
-          targets: desktop
+          name: core-compose-desktop
+          path: ~/.m2/repository/org/thisisthepy/compose
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }} -Pcompose.material3.version=${{ env.COMPOSE_VERSION }}
       - name: createDistributable
         working-directory: extended/samples/hello-jvm
         run: ./gradlew --no-daemon createDistributable
@@ -121,6 +151,7 @@ jobs:
   # Kotlin/Native targets too, and Kotlin/Native has no Linux arm64 host, so the arm64 cell
   # cannot build them itself. What the JVM images use is jars, which are the same everywhere.
   window-modules:
+    needs: core-compose
     name: Window modules for the JVM (built on Linux x64)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -135,14 +166,32 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      # The scene compiles against the core fork's Compose, and the GraalVM window layers'
+      # surfaces against the scene. The scene also declares macosArm64, which the toolchain
+      # resolves even when asked for the JVM, so it is built as a JVM module here.
+      - name: The core fork's Compose for the desktop
+        uses: actions/download-artifact@v4
+        with:
+          name: core-compose-desktop
+          path: ~/.m2/repository/org/thisisthepy/compose
+      - name: The scene as a JVM module
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' scene/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' common/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' common/module.yaml
       - name: Publish the window modules to mavenLocal
         shell: bash
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          mkdir -p ~/.cache/JetBrains/Kotlin/download.cache
+          curl -fsSL -o ~/.cache/JetBrains/Kotlin/download.cache/bd467c5b70-OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" || true
           cp project.yaml project.yaml.all
           printf 'modules:\n' > project.yaml
-          for m in common graalvm/graalvm-macos graalvm/graalvm-linux; do printf '  - %s\n' "$m" >> project.yaml; done
+          for m in common scene graalvm/graalvm-macos graalvm/graalvm-linux; do printf '  - %s\n' "$m" >> project.yaml; done
           ./kotlin publish mavenLocal
           cp project.yaml.all project.yaml
           find ~/.m2/repository/org/thisisthepy/compose/window -name '*.pom' | sort
@@ -153,7 +202,7 @@ jobs:
           retention-days: 3
 
   package:
-    needs: window-modules
+    needs: [window-modules, core-compose]
     name: One executable (GraalVM, ${{ matrix.name }})
     strategy:
       fail-fast: false
@@ -161,7 +210,12 @@ jobs:
         include:
           - name: macos-arm64
             os: macos-26
-            nik: vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64
+            # Upstream GraalVM, not Liberica NIK: NIK 25.0.4.1 runs main on a new thread on macOS
+            # whatever -H:-RunMainInNewThread says (run 39084384117: pthread_main_np is 0 in
+            # main), and the AppKit window then waits forever for the first thread, which is
+            # joining main. The AWT-free samples need nothing of NIK's; its static AWT
+            # libraries are for AWT images.
+            graalvm: https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-25.0.1/graalvm-community-jdk-25.0.1_macos-aarch64_bin.tar.gz
           - name: linux-x64
             os: ubuntu-24.04
             nik: vm-full-openjdk25.0.4.1+2-25.0.4.1+1-linux-amd64
@@ -170,11 +224,7 @@ jobs:
           - name: linux-arm64
             os: ubuntu-24.04-arm
             nik: vm-openjdk25.0.4.1+2-25.0.4.1+1-linux-aarch64
-          # Kotlin/Native packaging cells go here. Each one runs check-native-config.sh (already
-          # scans extended/window/native) and, after linking, `nm` on the executable for
-          # Objective-C or class-name lookups; see the K/N section of the plugin change list.
-          # Kotlin/Native packaging cells go here. The K/N window agent adds them: one per
-          # platform, building the native window modules into an executable and starting it.
+          # The Kotlin/Native cells are the package-kn and kn-* jobs below.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 240
     env:
@@ -201,14 +251,16 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends \
-            build-essential pkg-config xvfb xauth libgl1-mesa-dev libgl1-mesa-dri \
+            build-essential pkg-config xvfb xauth libgl1-mesa-dev libegl-dev libgl1-mesa-dri \
             libx11-dev libxext-dev libxi-dev libxrender-dev libxtst-dev libxrandr-dev libxcursor-dev \
-            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq
+            libfontconfig1-dev libfreetype-dev libdbus-1-dev zlib1g-dev fonts-noto-cjk jq gdb strace
 
-      - name: Liberica NIK 25
+      - name: GraalVM 25 (Liberica NIK, or upstream where the cell names it)
         shell: bash
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_BASE/bellsoft-liberica-${{ matrix.nik }}.tar.gz"
+          url="${{ matrix.graalvm }}"
+          [ -n "$url" ] || url="$NIK_BASE/bellsoft-liberica-${{ matrix.nik }}.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/nik.tar.gz" "$url"
           mkdir -p "$RUNNER_TEMP/nik" && tar xzf "$RUNNER_TEMP/nik.tar.gz" -C "$RUNNER_TEMP/nik"
           rel="$(find "$RUNNER_TEMP/nik" -name release -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
           home="$(dirname "$rel")"
@@ -238,17 +290,40 @@ jobs:
         with:
           name: window-modules-jvm
           path: ~/.m2/repository/org/thisisthepy/compose/window
+      - name: The core fork's Compose for the desktop
+        uses: actions/download-artifact@v4
+        with:
+          name: core-compose-desktop
+          path: ~/.m2/repository/org/thisisthepy/compose
+      - name: The scene as a JVM module
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' scene/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' scene/module.yaml
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ jvm ]/m' common/module.yaml
+          grep -q '^  platforms: \[ jvm \]$' common/module.yaml
       - name: Publish the window modules to mavenLocal
         if: runner.os == 'macOS'
         shell: bash
         working-directory: core-extended/extended/window
         run: |
           set -euo pipefail
+          if [ "$RUNNER_OS" = macOS ]; then
+            cache="$HOME/Library/Caches/JetBrains/Kotlin/download.cache"
+            mkdir -p "$cache"
+            curl -fsSL -o "$cache/f8362503fc-OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.5_8.tar.gz" "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.5_8.tar.gz" || true
+          elif [ "$RUNNER_OS" = Linux ]; then
+            cache="$HOME/.cache/JetBrains/Kotlin/download.cache"
+            mkdir -p "$cache"
+            curl -fsSL -o "$cache/bd467c5b70-OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz" || true
+          fi
           # The module lists are core-extended's own extended-window-publish matrix.
-          # The samples link the GraalVM window layers, which need no Compose. native/macos is
-          # the Kotlin/Native window and compiles against the core fork's macosArm64 Compose,
-          # which nothing here uses.
-          modules="common graalvm/graalvm-macos graalvm/graalvm-linux"
+          # The samples link the GraalVM window layers, and hello-awtfree hosts a scene in them.
+          # native/macos is the Kotlin/Native window and compiles against the core fork's
+          # macosArm64 Compose, which nothing here uses.
+          modules="common scene graalvm/graalvm-macos graalvm/graalvm-linux"
           cp project.yaml project.yaml.all
           printf 'modules:\n' > project.yaml
           for m in $modules; do printf '  - %s\n' "$m" >> project.yaml; done
@@ -256,22 +331,18 @@ jobs:
           cp project.yaml.all project.yaml
           find ~/.m2/repository/org/thisisthepy/compose/window -name '*.pom' | sort
 
-      - name: The core fork's Compose for the desktop
-        uses: ./.github/actions/core-compose
-        with:
-          ref: ${{ env.CORE_EXTENDED_REF }}
-          targets: desktop
 
-      # skiko-awt with the AWT switch, under the version Compose asks for, so the AWT-free images
-      # resolve it from mavenLocal. Without it skiko's look-and-feel branch keeps the Java toolkit
-      # in the image, and packageNativeImage refuses an AWT-free build.
+      # skiko-awt with the AWT switch, published by the core fork as 0.144.6.1, a version above
+      # the 0.144.6 Compose asks for; the AWT-free samples name it, so it is the one they resolve.
+      # Without it skiko's look-and-feel branch keeps the Java toolkit in the image, and
+      # packageNativeImage refuses an AWT-free build.
       - name: skiko-awt with the AWT switch to mavenLocal
         shell: bash
         run: bash core-extended/extended/skiko/build-skiko-awt.sh "$RUNNER_TEMP/skiko-awt"
 
       - name: Plugin to mavenLocal
         working-directory: gradle-plugins
-        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }}
+        run: ./gradlew --no-daemon -q :compose:publishToMavenLocal :jdk-version-probe:publishToMavenLocal -Pdeploy.version=${{ env.PLUGIN_VERSION }} -Pcompose.version=${{ env.COMPOSE_VERSION }} -Pcompose.material3.version=${{ env.COMPOSE_VERSION }}
 
       # The AwtFree sample: packageNativeImage with the no-JAWT archive and the window layer.
       - name: packageNativeImage (AwtFree sample)
@@ -293,6 +364,29 @@ jobs:
         shell: bash
         run: ./gradlew --no-daemon --info packageNativeImage
 
+      # Liberica NIK runs main on a new thread on macOS whatever -H:-RunMainInNewThread says, and
+      # an AWT-free image built with it hangs at its first window call. packageNativeImage has to
+      # refuse it before building, with the reason.
+      - name: An AWT-free macOS image refuses Liberica NIK
+        if: runner.os == 'macOS'
+        working-directory: extended/native-image/hello-awtfree-link
+        env:
+          SKIKO_STATIC: ${{ runner.temp }}/skiko-static-nojawt/out/${{ matrix.name }}
+          CORE_EXTENDED: ${{ github.workspace }}/core-extended
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/liberica.tar.gz" "$NIK_BASE/bellsoft-liberica-vm-full-openjdk25.0.4.1+2-25.0.4.1+1-macos-aarch64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/liberica" && tar xzf "$RUNNER_TEMP/liberica.tar.gz" -C "$RUNNER_TEMP/liberica"
+          rel="$(find "$RUNNER_TEMP/liberica" -name release -type f | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)"
+          status=0
+          GRAALVM_HOME="$(dirname "$rel")" ./gradlew --no-daemon packageNativeImage > "$RUNNER_TEMP/liberica.log" 2>&1 || status=$?
+          tail -20 "$RUNNER_TEMP/liberica.log"
+          [ "$status" -ne 0 ] || { echo "packageNativeImage built an AWT-free macOS image with Liberica NIK" >&2; exit 1; }
+          grep -q "This GraalVM is Liberica NIK" "$RUNNER_TEMP/liberica.log" ||
+            { echo "it failed, but not with the reason" >&2; exit 1; }
+          echo "refused, with the reason"
+
       - name: Start the AwtFree link sample
         working-directory: extended/native-image/hello-awtfree-link
         shell: bash
@@ -304,7 +398,22 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a timeout 120 ./app | tee out.txt
           else
-            perl -e 'alarm 120; exec @ARGV' ./app | tee out.txt
+            # It has hung here on the macOS runner (runs 39029929261 and 39034223682). If it
+            # does, the stacks of every thread are printed before it is stopped, so the hang
+            # says where it is.
+            ./app > out.txt 2>&1 &
+            pid=$!
+            for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "the link sample is still running after 120 s; its threads:" >&2
+              sample "$pid" 3 -file "$single/hang.txt" >/dev/null 2>&1 || true
+              cat "$single/hang.txt" >&2 || true
+              kill -9 "$pid" || true
+              cat out.txt
+              exit 1
+            fi
+            wait "$pid"
+            cat out.txt
           fi
           grep -q "link check ok" out.txt
 
@@ -332,6 +441,32 @@ jobs:
           else
             bash extended/native-image/check-one-executable.sh "$out" "$RUNNER_TEMP/one-executable"
           fi
+      # The window chrome and a screen reader, on the same executable: openbox drags its caption
+      # and every edge, double clicks to maximise, and libatspi walks its AT-SPI tree for the
+      # field, its label and the button, sets the field and presses the button and Close.
+      - name: Window chrome and a reader (openbox and at-spi2, under a virtual display)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -q --no-install-recommends openbox xdotool x11-utils dbus at-spi2-core libatspi2.0-dev
+          out="$(find "$SAMPLE_AWTFREE/build/compose/native-image" -mindepth 1 -maxdepth 1 -type d | head -1)"
+          exe="$(find "$out" -mindepth 1 -maxdepth 1 -type f | head -1)"
+          bash extended/native-image/check-linux-chrome.sh "$exe" core-extended "$RUNNER_TEMP/chrome"
+
+      # Said here rather than left out: an application built from source with this plugin needs a
+      # JDK on the machine that builds it, because Gradle, the Kotlin compiler and native-image
+      # all run on one. Needing nothing but the platform's linker holds only where the renderer
+      # arrives already built, as compose-rust's does (its build script downloads it); it cannot
+      # hold for this build, so this gate does not check it.
+      - name: What this gate does not check, and why
+        shell: bash
+        run: |
+          echo "The executable checked above needs no Java runtime to run. Building it did need one:"
+          echo "  java: $(java -version 2>&1 | head -1)"
+          echo "  native-image: $("$GRAALVM_HOME/bin/native-image" --version 2>&1 | head -1)"
+          echo "A build that needs only the platform's linker is one whose renderer arrives prebuilt."
+
       - name: Keep the self-check drawing
         if: always()
         uses: actions/upload-artifact@v4
@@ -346,4 +481,266 @@ jobs:
           path: |
             extended/native-image/*/build/tmp/packageNativeImage/**/*.log
             extended/native-image/*/build/reports/
+          if-no-files-found: ignore
+
+  # The same gate for a Kotlin/Native executable: hello-awtfree's content in the core fork's
+  # Kotlin/Native window (native-macos), linked by Gradle with the native desktop plugin against
+  # the core fork's macosArm64 Compose, then checked as the GraalVM images are. Linux cells join
+  # this matrix with the Linux window; Windows comes later.
+  package-kn:
+    name: One executable (Kotlin/Native, ${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-26
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    env:
+      SAMPLE_KN: extended/native-desktop/hello-awtfree-kn
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: extended/window
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Built once per CORE_EXTENDED_REF and restored from the cache after that.
+      - name: The core fork's Compose for macosArm64
+        uses: ./extended/ci/core-compose
+        with:
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          targets: macosArm64
+
+      - name: Cache the Kotlin toolchain and konan
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/JetBrains/Kotlin
+            ~/.konan
+          key: kn-window-${{ matrix.name }}-${{ env.CORE_EXTENDED_REF }}-${{ hashFiles('extended/native-desktop/hello-awtfree-kn/*.kts') }}
+          restore-keys: |
+            kn-window-${{ matrix.name }}-
+
+      - name: Publish the Kotlin/Native window modules to mavenLocal
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          set -euo pipefail
+          cp project.yaml project.yaml.all
+          printf 'modules:\n  - common\n  - native/macos\n' > project.yaml
+          ./kotlin publish mavenLocal
+          cp project.yaml.all project.yaml
+          find ~/.m2/repository/org/thisisthepy/compose/window -name '*.module' | sort
+
+      - name: The native desktop plugin to mavenLocal
+        working-directory: gradle-plugins
+        run: ./gradlew --no-daemon --console=plain :kotlin-native-desktop:publishToMavenLocal -Pdeploy.version=0.1.0-extended-dev
+
+      - name: Link the Kotlin/Native sample
+        working-directory: ${{ env.SAMPLE_KN }}
+        run: ./gradlew --no-daemon --console=plain linkReleaseExecutableMacosArm64
+
+      - name: Stage the executable alone
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/kn-out"
+          cp "$SAMPLE_KN/build/bin/macosArm64/releaseExecutable/hello-awtfree-kn.kexe" "$RUNNER_TEMP/kn-out/hello-awtfree-kn"
+          otool -l "$RUNNER_TEMP/kn-out/hello-awtfree-kn" | grep -A 2 LC_RPATH | awk '/path /{print $2}' | while read -r rpath; do
+            install_name_tool -delete_rpath "$rpath" "$RUNNER_TEMP/kn-out/hello-awtfree-kn"
+          done
+          ls -la "$RUNNER_TEMP/kn-out"
+
+      - name: Take every ICU data file off the runner
+        shell: bash
+        run: |
+          { find /usr /opt /Library /Applications /Users -name 'icudtl.dat' 2>/dev/null || true; } |
+            while IFS= read -r file; do echo "removing $file"; sudo rm -f "$file"; done
+
+      - name: One file, system libraries only, Korean with no ICU data, run alone
+        shell: bash
+        run: bash extended/native-image/check-one-executable.sh "$RUNNER_TEMP/kn-out" "$RUNNER_TEMP/one-executable"
+
+      - name: Keep the self-check drawing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-executable-kn-${{ matrix.name }}
+          path: ${{ runner.temp }}/one-executable/*.png
+          if-no-files-found: ignore
+
+  # The same application as a Kotlin/Native executable for Linux: the content of hello-awtfree
+  # hosted by the core fork's scene in its Kotlin/Native X11 window (native/linux), built by the
+  # core fork's own toolchain as a module of its window project (extended/native-desktop/
+  # hello-awtfree says why). Kotlin/Native has no arm64 Linux host, so both architectures are
+  # built here on x86-64; the arm64 executable is linked against the arm64 desktop libraries
+  # and run on an arm64 runner by kn-linux-arm64.
+  kn-build:
+    name: Build (Kotlin/Native, linux-x64 and linux-arm64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            extended/native-desktop/hello-awtfree
+            extended/native-image/hello-awtfree/src/main/kotlin
+            extended/ci
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: extended/window
+      - name: Make room for the Compose build
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell \
+            /usr/local/lib/node_modules /usr/local/julia* /opt/microsoft /opt/google
+          df -h /
+      - name: The X11, GL, fontconfig and FreeType development libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q pkg-config libx11-dev libxext-dev libgl1-mesa-dev \
+            libfontconfig1-dev libfreetype6-dev
+      # The arm64 executable is linked here, so the arm64 libraries it names have to be here,
+      # where native/linux's x11.def looks for them (/usr/lib/aarch64-linux-gnu).
+      - name: The arm64 desktop libraries to link against
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture arm64
+          for sources in /etc/apt/sources.list.d/*.sources; do
+            sudo sed -i '/^Types: deb$/a Architectures: amd64' "$sources"
+          done
+          [[ ! -f /etc/apt/sources.list ]] || sudo sed -i 's/^deb \(http\)/deb [arch=amd64] \1/' /etc/apt/sources.list
+          printf '%s\n' 'Types: deb' 'URIs: http://ports.ubuntu.com/ubuntu-ports' \
+            'Suites: noble noble-updates noble-security' 'Components: main universe' \
+            'Architectures: arm64' | sudo tee /etc/apt/sources.list.d/arm64-ports.sources
+          sudo apt-get update -q
+          sudo apt-get install -y -q libx11-dev:arm64 libxext-dev:arm64 libgl-dev:arm64 libegl-dev:arm64 \
+            libfontconfig-dev:arm64 libfreetype-dev:arm64
+      # Both architectures, because native/linux declares both and the toolchain resolves every
+      # platform a module declares.
+      - name: The core fork's Compose for Kotlin/Native Linux
+        uses: ./extended/ci/core-compose
+        with:
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          targets: linuxX64 linuxArm64
+      - name: Cache the Kotlin toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.konan
+            ~/.cache/JetBrains/Kotlin
+          key: kn-hello-linux-${{ env.CORE_EXTENDED_REF }}
+          restore-keys: kn-hello-linux-
+      # The sample becomes a module of the window project, with its links followed. The scene
+      # declares the JVM and macOS as well, whose Compose is not built here, so it is built as
+      # the Linux module it is for this executable; the sample is built for one architecture
+      # at a time.
+      - name: The sample as a module of the core fork's window project
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          set -euo pipefail
+          mkdir -p samples
+          cp -RL "$GITHUB_WORKSPACE/extended/native-desktop/hello-awtfree" samples/hello-awtfree
+          ls -la samples/hello-awtfree/src
+          perl -0pi -e 's/^  platforms: \[.*\]$/  platforms: [ linuxX64, linuxArm64 ]/m' scene/module.yaml
+          printf 'modules:\n  - common\n  - scene\n  - native/linux\n  - native/linux-scene\n  - samples/hello-awtfree\n' > project.yaml
+          cat project.yaml
+      - name: Build the executables
+        shell: bash
+        working-directory: core-extended/extended/window
+        run: |
+          set -euo pipefail
+          for cell in linux-x64:linuxX64 linux-arm64:linuxArm64; do
+            name="${cell%%:*}"; platform="${cell#*:}"
+            perl -0pi -e "s/^  platforms: \\[.*\\]\$/  platforms: [ $platform ]/m" samples/hello-awtfree/module.yaml
+            grep -n '^  platforms:' samples/hello-awtfree/module.yaml
+            rm -rf build/tasks/*hello-awtfree*
+            ./kotlin build -m hello-awtfree -p "$platform"
+            exe="$(find build -type f -name '*.kexe' -path '*hello-awtfree*' | head -1)"
+            [[ -n "$exe" ]] || { echo "no executable under build/:" >&2; find build -name '*.kexe' >&2; exit 1; }
+            mkdir -p "$RUNNER_TEMP/kn-out-$name/hello-awtfree"
+            cp "$exe" "$RUNNER_TEMP/kn-out-$name/hello-awtfree/hello-awtfree"
+            file "$RUNNER_TEMP/kn-out-$name/hello-awtfree/hello-awtfree"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kn-hello-awtfree-linux-x64
+          path: ${{ runner.temp }}/kn-out-linux-x64
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kn-hello-awtfree-linux-arm64
+          path: ${{ runner.temp }}/kn-out-linux-arm64
+          retention-days: 3
+
+  # The gate the GraalVM cells run, on the Kotlin/Native executable, on its own architecture:
+  # one file, only the system's libraries, Korean laid out with no ICU data file, the Compose
+  # content presented at the window's size; then the window chrome and a screen reader.
+  kn-run:
+    needs: kn-build
+    name: One executable (Kotlin/Native, ${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-24.04 }
+          - { name: linux-arm64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: extended/native-image
+      - uses: actions/checkout@v4
+        with:
+          repository: thisisthepy/compose-multiplatform-core-extended
+          ref: ${{ env.CORE_EXTENDED_REF }}
+          path: core-extended
+          sparse-checkout: extended/window/scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: kn-hello-awtfree-${{ matrix.name }}
+          path: ${{ runner.temp }}/kn-out
+      - name: Linux packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1 \
+            libx11-6 libxext6 libfontconfig1 libfreetype6 fonts-noto-cjk binutils gdb build-essential pkg-config \
+            openbox xdotool x11-utils dbus at-spi2-core libatspi2.0-dev
+          chmod +x "$RUNNER_TEMP/kn-out/hello-awtfree/hello-awtfree"
+      - name: Take every ICU data file off the runner
+        shell: bash
+        run: |
+          { find /usr /opt /Library /Applications /home /Users /snap -name 'icudtl.dat' 2>/dev/null || true; } |
+            while IFS= read -r file; do echo "removing $file"; sudo rm -f "$file"; done
+      - name: One file, system libraries only, Korean with no ICU data, run alone
+        shell: bash
+        run: |
+          xvfb-run -a -s '-screen 0 1280x1024x24' bash extended/native-image/check-one-executable.sh \
+            "$RUNNER_TEMP/kn-out/hello-awtfree" "$RUNNER_TEMP/one-executable"
+      - name: Window chrome and a reader (openbox and at-spi2, under a virtual display)
+        shell: bash
+        run: |
+          bash extended/native-image/check-linux-chrome.sh "$RUNNER_TEMP/kn-out/hello-awtfree/hello-awtfree" \
+            core-extended "$RUNNER_TEMP/chrome"
+      - name: Keep the self-check drawing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-executable-kn-${{ matrix.name }}
+          path: ${{ runner.temp }}/one-executable/*.png
           if-no-files-found: ignore

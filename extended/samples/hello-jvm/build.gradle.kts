@@ -9,7 +9,7 @@ plugins {
 
 dependencies {
     implementation(compose.desktop.currentOs)
-    implementation("org.thisisthepy.compose.material3:material3:1.11.0-alpha07-ext.1")
+    implementation("org.thisisthepy.compose.material3:material3:1.11.1-ext.1")
 }
 
 compose.desktop.application {

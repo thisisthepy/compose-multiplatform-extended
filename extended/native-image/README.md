@@ -31,7 +31,7 @@ local Maven repository first, as development builds, which is what the probe wor
     -Pjetbrains.publication.libraries=COMPOSE,COMPOSE_MATERIAL3 -Pextended.publication.dev=true
 # in gradle-plugins
 ./gradlew :compose:publishToMavenLocal -Pdeploy.version=1.11.1-ext.1-dev \
-    -Pcompose.version=1.11.1-ext.1-dev -Pcompose.material3.version=1.11.0-alpha07-ext.1-dev
+    -Pcompose.version=1.11.1-ext.1-dev -Pcompose.material3.version=1.11.1-ext.1-dev
 ```
 
 The agent writes its metadata on a clean exit, so close the application rather than kill
@@ -127,6 +127,18 @@ What it took, all in `windowsLink` and the static skiko archive:
 - Skia's ICU data is compiled into the skiko archive, since Skia otherwise looks for
   `icudtl.dat` beside the executable.
 
+## Which GraalVM
+
+An application with `windowing = Awt` needs Liberica NIK Full, the one distribution that ships the
+JDK's static AWT libraries. An AWT-free application on macOS needs a GraalVM that runs `main` on
+the process's first thread when told `-H:-RunMainInNewThread`: the AppKit window hands its calls
+to that thread, which has to be serving them. Liberica NIK 25.0.4.1 runs `main` on a new thread
+on macOS whatever the option says, and the first call that crosses waits forever; upstream
+GraalVM honours it. `packageNativeImage` gives the option itself for an AWT-free macOS image, and
+refuses to start with Liberica NIK there (it reads `IMPLEMENTOR` in the GraalVM's `release`
+file), naming the GraalVM to use instead. The gate builds the AWT-free samples on macOS with upstream GraalVM 25.0.1,
+and `hello-awtfree` exits with a message rather than hanging when `main` is on another thread.
+
 ## The one-executable gate
 
 `check-one-executable.sh` is what the "One executable (GraalVM, <os>)" jobs in
@@ -134,14 +146,75 @@ What it took, all in `windowsLink` and the static skiko archive:
 one file, that file names only the system's libraries (`otool -L`, `readelf -d` and `ldd`,
 `dumpbin -dependents`), and, copied alone into an empty directory on a runner with every
 `icudtl.dat` removed, it lays Korean out correctly (every glyph found, the word around a
-syllable whole, lines broken between words), draws it into a PNG and opens its window.
+syllable whole, lines broken between words), draws it into a PNG, and presents frames of
+Compose content in its window, none at a size other than the window's. `hello-awtfree` is a
+Compose application with no AWT: the core fork's scene module hosts its content in the GraalVM
+window, through the window's own surface (`appKitWindowSurface`, `x11WindowSurface`). A run
+that does not end within 120 s is stopped with every thread's stack printed. It then runs the
+executable once more, watched (every file it touches on Linux, through `strace`; every library
+it loads on macOS, through `DYLD_PRINT_LIBRARIES`), and fails if it looks for a Java runtime:
+anything under the JDK or GraalVM on the runner, a module image, `jvm.cfg`, `libjvm` or
+`libjava`. What the gate does not check is the build machine: building from source needs a JDK,
+for Gradle, the Kotlin compiler and native-image, and the gate says so in a step of its own.
 An executable that needs an ICU data file shows it there: a double click would select one
 syllable, and lines would wrap inside words.
 
-Measured by the gate, run 39028163166 (2026-10-17, NIK 25.0.4.1): `hello-awtfree` is one
+On macOS the gate also checks the window as a screen reader meets it, and runs the executable
+twice, with `HELLO_TITLE_BAR` unset (the Normal title bar) and set to `Simple`. Each run walks
+its own accessibility elements in process, through the objects AppKit's accessibility server
+answers every client from, because a hosted runner has not trusted any process for
+accessibility and an outside client is refused there. The run prints what the system's API
+answered an outside client, with its error number (`kAXErrorAPIDisabled`, -25211, on a runner
+that has not granted the trust). It fails unless the three system buttons are there, the content
+runs under the title bar, no title text is drawn, the caption's height and button room match the
+buttons' own frames, the corner radius is the core fork's measured table for that style and
+release, and the field and the button are found by their roles and names. On macOS 26 the
+Normal title bar's buttons must sit further in than the Simple one's.
+
+The "One executable (Kotlin/Native, <os>)" jobs run the same gate on
+`extended/native-desktop/hello-awtfree-kn`: the same content (`hello-awtfree/src/shared`) in the
+core fork's Kotlin/Native window (`native-macos`), linked by Gradle with the native desktop
+plugin against the core fork's `macosArm64` Compose, with no JVM. The macOS cell is there; the
+Linux cells come with the Linux window, and Windows after it.
+
+Measured by the gate, run 39028163166 (2026-10-17, NIK 25.0.4.1), before `hello-awtfree` hosted
+a Compose scene: it is one
 executable of 37.62 MB on macOS arm64, 46.27 MB on Linux x64 and 44.96 MB on Linux arm64, naming
 only system libraries, and on runners with no `icudtl.dat` each prints
 `text self-check: ok (no unresolved glyphs, word "반갑습니다", ...)` and inks the sample text.
+
+### The Kotlin/Native cells
+
+"One executable (Kotlin/Native, linux-x64)" and "(Kotlin/Native, linux-arm64)" run the same gate
+on the same application built with Kotlin/Native: `extended/native-desktop/hello-awtfree`, whose
+content is this sample's own `Content.kt` and `TextSelfCheck.kt` (linked, not copied), hosted by
+the scene in the core fork's Kotlin/Native X11 window (`native/linux`) and drawn through
+`native/linux-scene`'s `x11WindowSurface`. It is an Amper module of
+the core fork's window project rather than a Gradle build, because a klib is read only by the
+compiler that wrote it or a newer one, and the window modules are built by that project's
+toolchain. The "Build (Kotlin/Native, ...)" job copies it into a checkout of the core fork and
+builds both executables on x86-64, arm64 cross compiled, since Kotlin/Native has no arm64 Linux
+host; each is then run on its own architecture.
+
+### Window chrome and a reader on Linux
+
+`check-linux-chrome.sh` runs after the gate on every Linux cell, GraalVM and Kotlin/Native. It
+starts the application with `HELLO_RUN_SECONDS` on a virtual display and a session bus of its
+own, with openbox and at-spi2, and requires:
+
+- no title bar of the window manager's (`WindowChrome.Modern`, the default): `_NET_FRAME_EXTENTS`
+  is all zero;
+- a drag of the scene's caption moves the window by as far as the pointer went, a drag at each
+  edge and corner changes the size from that side only, and a double click in the caption
+  maximises it and a second restores it (the core fork's `extended/window/scripts/wm-chrome.sh`);
+- no frame presented at a size the window had already left, and no size the window took left
+  without a frame (the window's own `dxc resize:` count);
+- walking the application's AT-SPI tree with libatspi finds the text field (`entry` "Name"), its
+  label (`label` "Name"), the button (`push button` "click me") and the caption's three buttons;
+  setting the field's text and pressing the button reach the application, and pressing Close
+  closes it (the core fork's `extended/window/scripts/atspi-readback.c`).
+
+Whether Orca reads the window well, and how a drag feels, are checks by hand on a desktop.
 
 ## Running the Windows probe locally
 

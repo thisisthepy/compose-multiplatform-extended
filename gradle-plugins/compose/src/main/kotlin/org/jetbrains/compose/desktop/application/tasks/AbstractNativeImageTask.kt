@@ -24,6 +24,8 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
+import org.jetbrains.compose.desktop.application.internal.NativeImageMainThread
+import org.jetbrains.compose.desktop.application.internal.NativeImageNoAwt
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
 import org.jetbrains.compose.internal.utils.currentArch
@@ -122,6 +124,12 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         }
         val staticJdk = graalvm.resolve(platform.staticJdkDirectory)
         val awt = windowing.get() == ApplicationWindowing.Awt
+        // Before anything is built: on macOS an AWT-free image needs main on the first thread,
+        // which Liberica NIK does not give, and the image it builds hangs instead of failing.
+        if (platform == Platform.MacosArm64 && !awt) {
+            val release = graalvm.resolve("release")
+            NativeImageMainThread.problem(if (release.isFile) release.readText() else "")?.let { throw GradleException(it) }
+        }
         for (archive in if (awt) platform.staticJdkArchives else emptyList()) {
             if (!staticJdk.resolve(archive).isFile) {
                 throw GradleException(
@@ -163,7 +171,10 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
             "-Dcompose.nativeimage.staticLibraries=${linked.joinToString(",")}",
         )
         metadataDirectory.orNull?.asFile?.takeIf { it.isDirectory }?.let {
-            args += "-H:ConfigurationFileDirectories=${it.absolutePath}"
+            // An AwtFree image is built from the metadata with every AWT entry taken out of a copy,
+            // so a run of the agent on an AWT window cannot make AWT reachable.
+            val directory = if (awt) it else workDir.resolve("metadata").also { copy -> NativeImageNoAwt.cleanMetadataDirectory(it, copy) }
+            args += "-H:ConfigurationFileDirectories=${directory.absolutePath}"
         }
         args += link
         if (!awt) {
@@ -242,7 +253,10 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
         // sun.font declares a Windows-only native, and the prefix that makes sun.font built in
         // makes the image refer to it.
-        val stubs = compileC(graalvm, foreignStubs(skikoArchive, listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows")), "foreign_stubs")
+        // Only an AWT image makes sun.font built in; an AwtFree one has no such reference, and
+        // the post-link check would rightly find the name.
+        val sunFontStubs = if (awt) listOf("Java_sun_font_FileFontStrike__1getGlyphImageFromWindows") else emptyList()
+        val stubs = compileC(graalvm, foreignStubs(skikoArchive, sunFontStubs), "foreign_stubs")
         val skikoLibrary = "skiko:org_jetbrains_skia|org_jetbrains_skiko"
         val linked = if (awt) listOf(
             "awt:java_awt|sun_awt|sun_java2d|sun_print",
@@ -270,6 +284,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         for (library in listOf("stdc++", "GL", "X11", "Xext", "Xi", "Xrender", "Xtst", "fontconfig", "dl", "m", "pthread")) {
             linker("-l$library")
         }
+        // JetBrains' Skia for Linux arm64 finds GL through EGL, so an image that draws with GL
+        // there links it.
+        if (currentArch == Arch.Arm64) linker("-lEGL")
         return linked to link
     }
 
@@ -444,12 +461,16 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
     /** The feature and substitutions, compiled by the GraalVM doing the build. */
     private fun buildSupportJar(graalvm: File): File {
         val sources = workDir.resolve("support/src/org/jetbrains/compose/nativeimage").apply { mkdirs() }
-        for (name in listOf("LinkedLibraries", "StaticDesktopLibrariesFeature", "Substitutions")) {
+        val names = listOf("LinkedLibraries", "StaticDesktopLibrariesFeature", "Substitutions") +
+            if (windowing.get() == ApplicationWindowing.AwtFree) listOf("AwtFreeSubstitutions") else emptyList()
+        for (name in names) {
             sources.resolve("$name.java").writeText(resourceText("$name.java.txt"))
         }
         val classes = workDir.resolve("support/classes").apply { mkdirs() }
         run(
             listOf(graalvm.resolve("bin/javac").absolutePath, "-d", classes.absolutePath, "--add-modules", "org.graalvm.nativeimage") +
+                // The AwtFree substitutions name Kotlin and skiko types, which the application's own classpath holds.
+                (if ("AwtFreeSubstitutions" in names) listOf("-cp", runtimeClasspath.files.joinToString(File.pathSeparator)) else emptyList()) +
                 sources.listFiles()!!.map { it.absolutePath },
             workDir.resolve("javac.log"),
         )
@@ -533,17 +554,18 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      * analysis walks that branch whatever the property says, so `UIManager`, the toolkit and
      * GraalVM's copies of `libawt*.so` come into the image with it. The core fork's skiko-awt
      * (`extended/skiko/build-skiko-awt.sh`) puts the branch behind `AwtSwitch.available`, which
-     * is a constant once the class is initialised at build time with `-Dcompose.awt=false`.
+     * is a constant once the class is initialised at build time with `-Dcompose.awt=false`. The
+     * core fork's Compose reads the same property in `ExtendedAwt`, initialised the same way.
      *
-     * The toolkit and `Component` are also made forbidden types, so anything else that reaches
-     * AWT stops the build with the path that reached it, instead of an image that quietly carries
+     * The roots of AWT and Swing ([NativeImageNoAwt.forbiddenTypes]) are also made forbidden
+     * types, so anything else that reaches AWT stops the build with the path that reached it, instead of an image that quietly carries
      * AWT's libraries beside it.
      */
     private fun awtFreeArguments(): List<String> {
-        val switch = "org/jetbrains/skiko/AwtSwitch.class"
-        val hasSwitch = runtimeClasspath.files.any { file ->
-            file.isFile && file.name.endsWith(".jar") && ZipFile(file).use { it.getEntry(switch) != null }
+        fun onClasspath(entry: String) = runtimeClasspath.files.any { file ->
+            file.isFile && file.name.endsWith(".jar") && ZipFile(file).use { it.getEntry(entry) != null }
         }
+        val hasSwitch = onClasspath("org/jetbrains/skiko/AwtSwitch.class")
         if (!hasSwitch) {
             throw GradleException(
                 "windowing = AwtFree needs skiko-awt with the AWT switch (org.jetbrains.skiko.AwtSwitch), and the runtime classpath's " +
@@ -551,14 +573,26 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
                     "`extended/skiko/build-skiko-awt.sh <work-dir>` from compose-multiplatform-core-extended."
             )
         }
+        // The core fork's Compose has the same switch for its own AWT paths (the system
+        // clipboard, the clipboard entry that reads a Transferable, the key names, skiko's
+        // Swing dispatcher). JetBrains' Compose has none, and the forbidden types below then
+        // say where it reaches AWT.
+        val composeSwitch = "androidx.compose.ui.internal.ExtendedAwt"
+        val switches = listOf("org.jetbrains.skiko.AwtSwitch") +
+            if (onClasspath(composeSwitch.replace('.', '/') + ".class")) listOf(composeSwitch) else emptyList()
         return listOf(
             "-Dcompose.awt=false",
-            "--initialize-at-build-time=org.jetbrains.skiko.AwtSwitch",
+            "--initialize-at-build-time=${switches.joinToString(",")}",
+            // Turns on AwtFreeSubstitutions, which cut skiko's Swing frame watcher and dispatcher.
+            "-Dcompose.nativeimage.awtFree=true",
             "-H:+UnlockExperimentalVMOptions",
-            "-H:ReportAnalysisForbiddenType=java.awt.Toolkit",
-            "-H:ReportAnalysisForbiddenType=java.awt.Component",
-            "-H:-UnlockExperimentalVMOptions",
-        )
+        ) +
+            // One option per type: the option does not split its value at commas, so a joined
+            // list names one type that does not exist and forbids nothing.
+            NativeImageNoAwt.forbiddenTypes.map { "-H:ReportAnalysisForbiddenType=$it" } +
+            // On macOS the AppKit window takes its calls on the process's first thread, so main runs there.
+            (if (currentOS == OS.MacOS) NativeImageMainThread.options else emptyList()) +
+            "-H:-UnlockExperimentalVMOptions"
     }
 
     /**

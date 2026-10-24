@@ -11,7 +11,7 @@ plugins {
 // (-Pextended.publication.dev=true), which is what the plugin above is built to ask for.
 dependencies {
     implementation(compose.desktop.currentOs)
-    implementation("org.thisisthepy.compose.material3:material3:1.11.0-alpha07-ext.1-dev")
+    implementation("org.thisisthepy.compose.material3:material3:1.11.1-ext.1-dev")
 }
 
 compose.desktop.application {

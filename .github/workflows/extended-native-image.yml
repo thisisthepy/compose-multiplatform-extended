@@ -543,6 +543,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/kn-out"
           cp "$SAMPLE_KN/build/bin/macosArm64/releaseExecutable/hello-awtfree-kn.kexe" "$RUNNER_TEMP/kn-out/hello-awtfree-kn"
+          otool -l "$RUNNER_TEMP/kn-out/hello-awtfree-kn" | grep -A 2 LC_RPATH | awk '/path /{print $2}' | while read -r rpath; do
+            install_name_tool -delete_rpath "$rpath" "$RUNNER_TEMP/kn-out/hello-awtfree-kn"
+          done
           ls -la "$RUNNER_TEMP/kn-out"
 
       - name: Take every ICU data file off the runner

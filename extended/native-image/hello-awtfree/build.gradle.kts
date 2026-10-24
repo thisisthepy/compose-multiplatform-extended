@@ -15,9 +15,6 @@ val windowArtifact = if (macos) "graalvm-macos" else "graalvm-linux"
 
 sourceSets.main {
     kotlin.srcDir(if (macos) "src/macos/kotlin" else "src/linux/kotlin")
-    // The content and the text check, shared with the Kotlin/Native sample
-    // (extended/native-desktop/hello-awtfree-kn).
-    kotlin.srcDir("src/shared/kotlin")
 }
 
 dependencies {

@@ -26,8 +26,6 @@ kotlin {
         }
     }
     sourceSets.macosMain {
-        // The content and the text check hello-awtfree draws and runs.
-        kotlin.srcDir("../../native-image/hello-awtfree/src/shared/kotlin")
         dependencies {
             implementation("org.thisisthepy.compose.window:common:$window")
             implementation("org.thisisthepy.compose.window:native-macos:$window")

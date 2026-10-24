@@ -33,7 +33,7 @@ dependencies {
     // skiko-awt with the AWT switch, from compose-multiplatform-core-extended's
     // extended/skiko/build-skiko-awt.sh. Its version sorts above the 0.144.6 Compose asks for, so
     // it is the one the image takes.
-    implementation("org.jetbrains.skiko:skiko-awt:0.144.6.1")
+    implementation("org.thisisthepy.compose.skiko:skiko-awt:1.11.1-ext.1")
 }
 
 compose.desktop.application {

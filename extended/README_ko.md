@@ -41,7 +41,7 @@ extended/compose/publish-local.sh desktop      # 또는 macosArm64, linuxX64, li
 # 이 저장소에서
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
+    -Pdeploy.version=1.11.1-ext.2-dev -Pcompose.version=1.11.1-ext.2
 ```
 
 `settings.gradle.kts` 와 `build.gradle.kts` 는 영어 README 의 Install 절과 같습니다. 플러그인 ID 는
@@ -199,7 +199,7 @@ dependencyResolutionManagement {
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.2-dev"
 }
 
 dependencies {
@@ -253,11 +253,11 @@ compose.desktop.application {
 - 플러그인 ID: `org.thisisthepy.compose` (마커
   `org.thisisthepy.compose:org.thisisthepy.compose.gradle.plugin`)
 - 아티팩트: `org.thisisthepy.compose:compose-gradle-plugin`
-- 버전: `<upstream version>-ext.<N>`. 기본값은 `1.11.1-ext.1` 입니다(`gradle-plugins/gradle.properties`).
-  로컬 빌드는 `-ext.<N>-dev` 이고, probe 와 예제는 `1.11.1-ext.1-dev` 를 씁니다.
+- 버전: `<upstream version>-ext.<N>`. 기본값은 `1.11.1-ext.2` 입니다(`gradle-plugins/gradle.properties`).
+  로컬 빌드는 `-ext.<N>-dev` 이고, probe 와 예제는 `1.11.1-ext.2-dev` 를 씁니다.
 - 별칭(`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` 등)은
   compose-multiplatform-core-extended 의 `org.thisisthepy.compose.*` 라이브러리를 `-Pcompose.version`
-  과 `-Pcompose.material3.version`(`1.11.1-ext.1`)으로 가리킵니다.
+  과 `-Pcompose.material3.version`(`1.11.1-ext.2`)으로 가리킵니다.
   `compose("org.jetbrains.compose.ui:ui")` 도 포크의 좌표로 바뀝니다.
 - components 와 Compose HTML 은 JetBrains 것을 업스트림 버전(`1.11.1`)으로 씁니다. core 포크가
   빌드하지 않기 때문입니다.
@@ -265,12 +265,12 @@ compose.desktop.application {
 ```sh
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.1-dev -Pcompose.version=1.11.1-ext.1
+    -Pdeploy.version=1.11.1-ext.2-dev -Pcompose.version=1.11.1-ext.2
 ```
 
 ```kotlin
 plugins {
-    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.2-dev"
 }
 ```
 
@@ -283,7 +283,7 @@ plugins {
 `extended` 에 병합할 때마다 플러그인과 그 마커, 함께 있는 라이브러리를 GitHub Packages 에
 `<deploy.version>-dev.<commit>.<core commit>` 으로 배포합니다. 앞은 이 저장소 병합 커밋의 앞 열
 글자이고, 뒤는 플러그인의 별칭이 가리키는 core 포크 개발 빌드의 커밋입니다(예:
-`1.11.1-ext.1-dev.0123456789.abcdef0123`). 그 core 빌드는 플러그인을 빌드할 때 core 포크가 가장 최근에
+`1.11.1-ext.2-dev.0123456789.abcdef0123`). 그 core 빌드는 플러그인을 빌드할 때 core 포크가 가장 최근에
 성공한 개발 배포이고, core 포크의 개발 배포도 끝날 때마다 자기를 가리키는 플러그인 개발 빌드를
 시작합니다. 그래서 플러그인 개발 빌드는 늘 GitHub Packages 에 있는 Compose 라이브러리를 가리킵니다.
 `.github/workflows/extended-publish.yml` 이 이 일을 하며, 올리기 전에 빌드를 검사합니다. 접미사 없는 포크
@@ -331,10 +331,10 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 plugins {
-    id("org.thisisthepy.compose") version "1.11.1-ext.1-dev.<commit>.<core commit>"
+    id("org.thisisthepy.compose") version "1.11.1-ext.2-dev.<commit>.<core commit>"
 }
 ```
 
 원하는 core 빌드를 가리키는 플러그인 개발 빌드가 아직 없다면, 별칭 대신 라이브러리를 명시적인
-`-dev.<core commit>` 좌표(`org.thisisthepy.compose.foundation:foundation:1.11.1-ext.1-dev.<core commit>`)
+`-dev.<core commit>` 좌표(`org.thisisthepy.compose.foundation:foundation:1.11.1-ext.2-dev.<core commit>`)
 로 지정하고, 포크 라이브러리를 모두 같은 core 커밋으로 맞춥니다.

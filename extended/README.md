@@ -60,7 +60,7 @@ extended/compose/publish-local.sh desktop      # or macosArm64, linuxX64, linuxA
 # in this repository
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.2-dev -Pcompose.version=1.11.1-ext.2
+    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.2
 ```
 
 ```kotlin
@@ -78,7 +78,7 @@ dependencyResolutionManagement {
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.thisisthepy.compose") version "1.11.1-ext.2-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.3-dev"
 }
 ```
 
@@ -285,7 +285,7 @@ dependencyResolutionManagement {
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.thisisthepy.compose") version "1.11.1-ext.2-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.3-dev"
 }
 
 dependencies {
@@ -339,8 +339,8 @@ The plugin is published under this fork's own name, so that it can sit beside Je
 - plugin ID: `org.thisisthepy.compose` (marker
   `org.thisisthepy.compose:org.thisisthepy.compose.gradle.plugin`)
 - artifact: `org.thisisthepy.compose:compose-gradle-plugin`
-- version: `<upstream version>-ext.<N>`, `1.11.1-ext.2` by default (`gradle-plugins/gradle.properties`);
-  `-ext.<N>-dev` for a local build. The probes and samples use `1.11.1-ext.2-dev`.
+- version: `<upstream version>-ext.<N>`, `1.11.1-ext.3` by default (`gradle-plugins/gradle.properties`);
+  `-ext.<N>-dev` for a local build. The probes and samples use `1.11.1-ext.3-dev`.
 - the aliases (`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` and the rest)
   resolve to compose-multiplatform-core-extended's `org.thisisthepy.compose.*` libraries at
   `-Pcompose.version` and `-Pcompose.material3.version` (`1.11.1-ext.2`).
@@ -352,12 +352,12 @@ The plugin is published under this fork's own name, so that it can sit beside Je
 ```sh
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.2-dev -Pcompose.version=1.11.1-ext.2
+    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.2
 ```
 
 ```kotlin
 plugins {
-    id("org.thisisthepy.compose") version "1.11.1-ext.2-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.3-dev"
 }
 ```
 
@@ -370,7 +370,7 @@ fork first (`extended/compose/publish-local.sh`, see the core fork's
 Every merge into `extended` publishes the plugin, its marker and the libraries beside it to
 GitHub Packages as `<deploy.version>-dev.<commit>.<core commit>`: the first ten characters of
 this repository's merge commit, then of the core fork commit whose dev build the plugin's
-aliases name (`1.11.1-ext.2-dev.0123456789.abcdef0123`, for example). That core build is the
+aliases name (`1.11.1-ext.3-dev.0123456789.abcdef0123`, for example). That core build is the
 core fork's latest successful dev publish when the plugin is built, and each core dev publish
 also starts a plugin dev build against itself, so every plugin dev build names Compose
 libraries that exist on GitHub Packages. `.github/workflows/extended-publish.yml` does it, and
@@ -420,7 +420,7 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 plugins {
-    id("org.thisisthepy.compose") version "1.11.1-ext.2-dev.<commit>.<core commit>"
+    id("org.thisisthepy.compose") version "1.11.1-ext.3-dev.<commit>.<core commit>"
 }
 ```
 

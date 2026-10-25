@@ -54,7 +54,7 @@ private fun KotlinJsIrTarget.configureSkikoWebRuntime() {
         val unpackRuntime = project.registerTask<UnpackSkikoRuntimeTask>(
             joinLowerCamelCase("unpack", qualifierName, "skikoRuntimeFor", target.name)
         ) {
-            runtimeFiles.from(skikoWebRuntimeJarFiles)
+            runtimeFiles.from(project.provider { skikoWebRuntimeJarFiles.files.ifEmpty { project.skikoLegacyWebRuntimeJarFiles(runtimeDepsConfig) } })
             outputDirectory.set(unpackedRuntimeDir)
         }
 
@@ -128,6 +128,26 @@ private fun Project.skikoWebRuntimeJarFiles(runtimeDepsConfig: Configuration) =
             )
         }
     }.files
+
+/**
+ * Skiko releases before the one that publishes a `skiko-runtime` variant (0.144.6 and older) ship
+ * the web runtime only as the separate `skiko-js-wasm-runtime` artifact, which has no Gradle
+ * metadata, so the attribute based lookup above finds nothing. Resolve that artifact directly,
+ * at the version of Skiko the runtime classpath already uses.
+ */
+private fun Project.skikoLegacyWebRuntimeJarFiles(runtimeDepsConfig: Configuration): Set<java.io.File> {
+    val skikoVersion = runtimeDepsConfig.incoming.resolutionResult.allComponents
+        .map { it.id }
+        .filterIsInstance<ModuleComponentIdentifier>()
+        .firstOrNull { it.group == SKIKO_GROUP && it.module.startsWith("skiko") }
+        ?.version
+        ?: return emptySet()
+    val legacy = configurations.detachedConfiguration(
+        dependencies.create("$SKIKO_GROUP:skiko-js-wasm-runtime:$skikoVersion")
+    )
+    legacy.isTransitive = false
+    return legacy.files
+}
 
 private fun KotlinJsIrTarget.configureComposeUiTestExecutableCheck() {
     val target = this

@@ -50,8 +50,22 @@ nothing in the executable that the application does not use.
 
 ## Install
 
-The fork is not on a public repository yet. Publish the core fork's Compose and then the plugin
-to your local Maven repository, and put `mavenLocal()` ahead of the Gradle Plugin Portal:
+The plugin and the Compose libraries are on Maven Central, not on the Gradle Plugin Portal (the
+Portal does not accept a fork of an active plugin). Add `mavenCentral()` to the plugin
+repositories:
+
+```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories { mavenCentral(); gradlePluginPortal(); google() }
+}
+dependencyResolutionManagement {
+    repositories { mavenCentral(); google() }
+}
+```
+
+To try an unreleased build instead, publish the core fork's Compose and then the plugin to your
+local Maven repository, and put `mavenLocal()` first in both lists:
 
 ```sh
 # in a checkout of compose-multiplatform-core-extended, branch extended
@@ -64,21 +78,11 @@ cd gradle-plugins
 ```
 
 ```kotlin
-// settings.gradle.kts
-pluginManagement {
-    repositories { mavenLocal(); gradlePluginPortal(); mavenCentral(); google() }
-}
-dependencyResolutionManagement {
-    repositories { mavenLocal(); mavenCentral(); google() }
-}
-```
-
-```kotlin
 // build.gradle.kts
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.compose") version "2.2.20"
-    id("org.thisisthepy.compose") version "1.11.1-ext.3-dev"
+    id("org.thisisthepy.compose") version "1.11.1-ext.3"
 }
 ```
 

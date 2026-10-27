@@ -31,8 +31,21 @@ AWT 없이 만들기 때문에 애플리케이션이 쓰지 않는 것은 실행
 
 ## 설치
 
-아직 공개 저장소에 없습니다. core 포크의 Compose 를, 그다음 플러그인을 로컬 Maven 저장소에 게시하고,
-`mavenLocal()` 을 Gradle Plugin Portal 보다 앞에 둡니다.
+플러그인과 Compose 라이브러리는 Maven Central 에 있습니다. Gradle Plugin Portal 에는 없습니다. 활성 플러그인의
+포크는 Portal 이 받지 않습니다. 플러그인 저장소에 `mavenCentral()` 을 넣습니다.
+
+```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories { mavenCentral(); gradlePluginPortal(); google() }
+}
+dependencyResolutionManagement {
+    repositories { mavenCentral(); google() }
+}
+```
+
+아직 나오지 않은 빌드를 써 보려면 core 포크의 Compose 를, 그다음 플러그인을 로컬 Maven 저장소에 게시하고,
+두 목록 맨 앞에 `mavenLocal()` 을 둡니다.
 
 ```sh
 # compose-multiplatform-core-extended 의 extended 브랜치 체크아웃에서
@@ -44,7 +57,7 @@ cd gradle-plugins
     -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.2
 ```
 
-`settings.gradle.kts` 와 `build.gradle.kts` 는 영어 README 의 Install 절과 같습니다. 플러그인 ID 는
+`build.gradle.kts` 는 영어 README 의 Install 절과 같습니다. 플러그인 ID 는
 `org.thisisthepy.compose` 입니다. 이 포크 자신의 ID 라서 JetBrains 의 `org.jetbrains.compose` 옆에 두어도
 어느 쪽도 다른 쪽을 대신하지 않습니다.
 

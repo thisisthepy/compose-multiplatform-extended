@@ -1,6 +1,7 @@
 # Publishes the Gradle plugins: every merge into extended to GitHub Packages as a dev build,
 # and a release tag to Maven Central (through the Sonatype Central Portal, with the plugin
-# marker artifacts) and to the Gradle Plugin Portal.
+# marker artifacts). The Gradle Plugin Portal is not used: it refused the plugin, a fork of
+# org.jetbrains.compose, so users add mavenCentral() to pluginManagement.repositories.
 #
 # Three modes, one set of jobs:
 # - dev (a push to extended, or a manual run with mode dev on extended, which the core fork's
@@ -13,11 +14,9 @@
 #   dev build names libraries that exist.
 # - dry run (a pull request, or a manual run with no tag): builds both, checks the dev build,
 #   and checks the Central bundle signed with a key made in the job and thrown away after,
-#   plugin markers included. Nothing is uploaded. The Plugin Portal is not asked anything:
-#   publishPlugins --validate-only sends the plugin to the Portal with an API key to be checked
-#   there, so a run without credentials cannot use it.
+#   plugin markers included. Nothing is uploaded.
 # - release (a tag v<version>, or a manual run naming one): the Central bundle, signed with the
-#   release key, uploaded to the Central Portal, then publishPlugins. The tag must sit on a
+#   release key, uploaded to the Central Portal. The tag must sit on a
 #   merge commit on extended's first-parent line and name deploy.version: merging into
 #   extended is the release, and that merge is the owner's.
 #
@@ -26,10 +25,7 @@
 #   MAVEN_GPG_PASSPHRASE    its passphrase
 #   CENTRAL_TOKEN_USERNAME  the Central Portal user token's username half
 #   CENTRAL_TOKEN_PASSWORD  the Central Portal user token's password half
-#   GRADLE_PUBLISH_KEY      the Gradle Plugin Portal API key
-#   GRADLE_PUBLISH_SECRET   its secret
-# The release uploads run in the environments maven-central and gradle-plugin-portal, where
-# required reviewers can be set.
+# The release upload runs in the environment maven-central, where required reviewers can be set.
 name: Extended publish
 
 on:
@@ -454,37 +450,3 @@ jobs:
         run: |
           extended/publish/central-upload.sh "$RUNNER_TEMP/central-bundle.zip" \
             "compose-multiplatform-extended $VERSION" "$TYPE"
-
-  plugin-portal:
-    name: Publish to the Gradle Plugin Portal
-    needs: [ plan, central ]
-    if: needs.plan.outputs.release == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    environment: gradle-plugin-portal
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.ref }}
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-read-only: true
-
-      # com.gradle.plugin-publish reads the key and secret from these two variables, and
-      # publishes every plugin the build declares, at deploy.version.
-      - name: publishPlugins
-        working-directory: gradle-plugins
-        env:
-          GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
-          GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
-        run: |
-          set -euo pipefail
-          [[ -n "$GRADLE_PUBLISH_KEY" && -n "$GRADLE_PUBLISH_SECRET" ]] ||
-            { echo "::error::GRADLE_PUBLISH_KEY and GRADLE_PUBLISH_SECRET must be set"; exit 1; }
-          ./gradlew --no-daemon publishPlugins

@@ -4,7 +4,8 @@
 Usage:
   central_bundle.py stage    --from <repo> [--from <repo>...] --out <dir> [--project <owner/repo>]
                              [--dev-suffix=<-dev.sha>] [--exclude-group <group>...]
-  central_bundle.py sign     <dir> [--key <id>] [--checksums-only]
+                             [--skip-target <target>...]
+  central_bundle.py sign     <dir> [--key <id>] [--checksums-only] [--all-checksums]
   central_bundle.py validate <dir> [--version <v> | --dev=<-dev.sha>] [--require <group:artifact>...]
                                    [--verify-signatures | --unsigned]
   central_bundle.py zip      <dir> <bundle.zip>
@@ -35,13 +36,21 @@ stage    copies every component under org/thisisthepy from each repository into 
          out and listed, so the root offers only the targets the bundle carries and a consumer
          on another target is told the module does not support it instead of failing on a
          missing file. A real dependency on a missing fork component is left for validate.
+         With --skip-target (repeatable: tvosArm64, js, ...) every component that is a target
+         of a root (its Gradle module's component names the root, and its artifact is
+         <root>-<target> in lower case) is left out before that, so the roots lose those
+         variants the same way: a release carries the targets its consumers use, not every
+         target the build configured. wasm-js is its own target, never taken for js.
          With --dev-suffix every staged version V becomes V<suffix>, everywhere it is named:
          directories, file names, each POM's own version and the versions of the fork's
          artifacts it depends on, and in each Gradle module the component, its variants'
          available-at targets, file names and urls, and dependency versions. A reference left
          at V would send a consumer of the dev build back to the release.
-sign     writes .md5, .sha1, .sha256 and .sha512 beside every file, and an ASCII-armoured
-         detached signature (.asc) made with gpg, which must hold the secret key already.
+sign     writes .md5 and .sha1 beside every file, which is what Central requires (it takes
+         .sha256 and .sha512 but does not ask for them, and every file counts against the
+         namespace's file limit), and an ASCII-armoured detached signature (.asc) made with
+         gpg, which must hold the secret key already. --all-checksums writes .sha256 and
+         .sha512 as well.
          GPG_PASSPHRASE, when set, is the key's passphrase. --checksums-only writes the
          checksums and no signatures, for a repository that does not ask for them.
 validate checks <dir> the way Central's validation does, and a little more:
@@ -53,7 +62,8 @@ validate checks <dir> the way Central's validation does, and a little more:
            and scm with url and connection;
          - every component that is not a bare POM has its main file, a sources jar and a
            javadoc jar;
-         - every file has .asc, .md5, .sha1, .sha256 and .sha512, and the checksums match;
+         - every file has .asc, .md5 and .sha1, and every checksum beside it (.sha256 and
+           .sha512 too, when there) matches;
          - every org.thisisthepy dependency a POM names, and every org.thisisthepy variant a
            Gradle module points at, is in the bundle at that version, so nothing on Central
            sends a consumer to a coordinate nobody published;
@@ -89,6 +99,8 @@ PREFIX = "org.thisisthepy"
 POM_NS = "http://maven.apache.org/POM/4.0.0"
 XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 CHECKSUMS = {"md5": hashlib.md5, "sha1": hashlib.sha1, "sha256": hashlib.sha256, "sha512": hashlib.sha512}
+# What Central requires beside every file; the others in CHECKSUMS are optional there.
+REQUIRED_CHECKSUMS = ("md5", "sha1")
 SIDE_FILES = tuple("." + ext for ext in CHECKSUMS) + (".asc",)
 SKIPPED = ("maven-metadata", "_remote.repositories", ".lastUpdated")
 VERSION_RULE = re.compile(r"^\d+(\.\d+)*(-[A-Za-z0-9.]+)?-ext\.\d+$")
@@ -127,7 +139,7 @@ def primary_files(directory):
 
 # --- stage -------------------------------------------------------------------------------
 
-def stage(sources, out, project, dev_suffix=None, excluded=()):
+def stage(sources, out, project, dev_suffix=None, excluded=(), skip_targets=()):
     os.makedirs(out, exist_ok=True)
     conflicts = []
     roots = []
@@ -157,6 +169,8 @@ def stage(sources, out, project, dev_suffix=None, excluded=()):
         for line in roots:
             print(f"FAIL  {line}")
         sys.exit(f"error: {len(roots)} Gradle module(s) differ between hosts; only the first repository may publish them")
+    if skip_targets:
+        drop_targets(out, skip_targets)
     prune_unbuilt(out)
     if dev_suffix:
         rename_versions(out, dev_suffix)
@@ -175,6 +189,34 @@ def stage(sources, out, project, dev_suffix=None, excluded=()):
     for line in added:
         print(f"empty {line}")
     print(f"staged {sum(1 for _ in components(out))} component(s) in {out}, {len(added)} empty jar(s) added")
+
+
+def target_of(group, artifact, version, directory):
+    """The target a component publishes for its root (iosarm64, wasm-js), or None for a root."""
+    module_path = os.path.join(directory, f"{artifact}-{version}.module")
+    if not os.path.isfile(module_path):
+        return None
+    with open(module_path) as f:
+        component = json.load(f).get("component", {})
+    root = component.get("module", "")
+    if "url" not in component or component.get("group") != group or not artifact.startswith(root + "-"):
+        return None
+    return artifact[len(root) + 1:]
+
+
+def drop_targets(out, skip_targets):
+    skipped = {target.lower() for target in skip_targets}
+    dropped = []
+    for group, artifact, version, directory in list(components(out)):
+        if target_of(group, artifact, version, directory) in skipped:
+            shutil.rmtree(directory)
+            parent = os.path.dirname(directory)
+            if not os.listdir(parent):
+                os.rmdir(parent)
+            dropped.append(f"{group}:{artifact}:{version}")
+    for line in sorted(dropped):
+        print(f"skip  {line}")
+    print(f"left out {len(dropped)} component(s) for {', '.join(sorted(skipped))}")
 
 
 def prune_unbuilt(out):
@@ -372,7 +414,7 @@ def empty_jar(path, classifier, coordinate):
 
 # --- sign --------------------------------------------------------------------------------
 
-def sign(out, key, checksums_only=False):
+def sign(out, key, checksums_only=False, all_checksums=False):
     passphrase = os.environ.get("GPG_PASSPHRASE")
     count = 0
     for _, _, _, directory in components(out):
@@ -381,6 +423,8 @@ def sign(out, key, checksums_only=False):
             with open(path, "rb") as f:
                 data = f.read()
             for ext, algorithm in CHECKSUMS.items():
+                if not all_checksums and ext not in REQUIRED_CHECKSUMS:
+                    continue
                 with open(f"{path}.{ext}", "w") as f:
                     f.write(algorithm(data).hexdigest())
             count += 1
@@ -466,7 +510,8 @@ def validate(out, version, required, verify, dev=None, unsigned=False):
             for ext, algorithm in CHECKSUMS.items():
                 side = f"{path}.{ext}"
                 if not os.path.isfile(side):
-                    errors.append(f"{where}: {name} has no .{ext}")
+                    if ext in REQUIRED_CHECKSUMS:
+                        errors.append(f"{where}: {name} has no .{ext}")
                     continue
                 with open(side) as f:
                     content = f.read().split()
@@ -637,10 +682,12 @@ def main():
     p.add_argument("--project", default="thisisthepy/compose-multiplatform-core-extended")
     p.add_argument("--dev-suffix")
     p.add_argument("--exclude-group", action="append", default=[])
+    p.add_argument("--skip-target", dest="skip_targets", action="append", default=[])
     p = commands.add_parser("sign")
     p.add_argument("dir")
     p.add_argument("--key")
     p.add_argument("--checksums-only", action="store_true")
+    p.add_argument("--all-checksums", action="store_true")
     p = commands.add_parser("validate")
     p.add_argument("dir")
     p.add_argument("--version")
@@ -656,9 +703,10 @@ def main():
     p.add_argument("url")
     args = parser.parse_args()
     if args.command == "stage":
-        stage([os.path.expanduser(s) for s in args.sources], args.out, args.project, args.dev_suffix, set(args.exclude_group))
+        stage([os.path.expanduser(s) for s in args.sources], args.out, args.project, args.dev_suffix, set(args.exclude_group),
+              args.skip_targets)
     elif args.command == "sign":
-        sign(args.dir, args.key, args.checksums_only)
+        sign(args.dir, args.key, args.checksums_only, args.all_checksums)
     elif args.command == "validate":
         if args.dev and not DEV_SUFFIX.match(args.dev):
             sys.exit(f"error: a dev suffix is -dev.<commit>[.<commit>], not '{args.dev}'")

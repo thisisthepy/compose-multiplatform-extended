@@ -113,8 +113,18 @@ expect_fail "a required coordinate is enforced" "required, and not in the bundle
 
 out="$(build noasc)"; rm "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.jar.asc"
 expect_fail "a missing signature fails" "has no .asc" "$out"
-out="$(build nosha512)"; rm "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.pom.sha512"
-expect_fail "a missing sha512 fails" "has no .sha512" "$out"
+out="$(build nosha1)"; rm "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.pom.sha1"
+expect_fail "a missing sha1 fails" "has no .sha1" "$out"
+# Central requires .md5 and .sha1 and only takes .sha256 and .sha512; every file counts against
+# the namespace's file limit, so sign writes the two it requires unless asked for all four.
+out="$(build twosums)"; d="$out/org/thisisthepy/compose/ui/ui/$V"
+[[ -f "$d/ui-$V.pom.md5" && -f "$d/ui-$V.pom.sha1" && ! -e "$d/ui-$V.pom.sha256" && ! -e "$d/ui-$V.pom.sha512" ]] &&
+    pass "sign writes .md5 and .sha1 and no .sha256 or .sha512" || fail "sign wrote other checksums than .md5 and .sha1"
+python3 -I "$tool" sign "$out" --all-checksums > /dev/null
+[[ -f "$d/ui-$V.pom.sha256" && -f "$d/ui-$V.pom.sha512" ]] &&
+    pass "sign --all-checksums writes .sha256 and .sha512 as well" || fail "sign --all-checksums"
+echo 0 > "$d/ui-$V.jar.sha256"
+expect_fail "a .sha256 that is there and wrong fails" "sha256 does not match" "$out"
 out="$(build badmd5)"; echo 0 > "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.jar.md5"
 expect_fail "a wrong checksum fails" "md5 does not match" "$out"
 out="$(build tampered)"; echo x >> "$out/org/thisisthepy/compose/ui/ui-linuxx64/$V/ui-linuxx64-$V.klib"
@@ -190,6 +200,39 @@ else
 fi
 grep -q "linuxX64ApiElements-published" "$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.module" &&
     pass "a variant on a staged target is kept" || fail "a staged target's variant was pruned"
+
+# --skip-target: a target's components are left out and the root loses its variant for it,
+# so a release carries only the targets its consumers use. wasm-js is not js.
+repo="$work/skip-repo"; out="$work/skip-out"; rm -rf "$repo" "$out"
+make_repo "$repo"
+for t in js wasm-js; do
+    d="$repo/org/thisisthepy/compose/ui/ui-$t/$V"; mkdir -p "$d"
+    pom "$d/ui-$t-$V.pom" org.thisisthepy.compose.ui "ui-$t" "$V" klib
+    echo klib > "$d/ui-$t-$V.klib"
+    cat > "$d/ui-$t-$V.module" <<JSON
+{"formatVersion":"1.1","component":{"url":"../../ui/$V/ui-$V.module","group":"org.thisisthepy.compose.ui","module":"ui","version":"$V"},
+ "variants":[{"name":"${t}ApiElements-published","files":[{"name":"ui-$t-$V.klib","url":"ui-$t-$V.klib"}]}]}
+JSON
+done
+python3 -I - "$repo/org/thisisthepy/compose/ui/ui/$V/ui-$V.module" "$V" <<'PY2'
+import json, sys
+path, v = sys.argv[1:]
+m = json.load(open(path))
+for t, name in (("js", "jsApiElements-published"), ("wasm-js", "wasmJsApiElements-published")):
+    m["variants"].append({"name": name, "available-at": {"url": f"../../ui-{t}/{v}/ui-{t}-{v}.module", "group": "org.thisisthepy.compose.ui", "module": f"ui-{t}", "version": v}})
+json.dump(m, open(path, "w"))
+PY2
+python3 -I "$tool" stage --from "$repo" --out "$out" --skip-target js --skip-target tvosArm64 > "$work/log"
+python3 -I "$tool" sign "$out" > /dev/null
+root="$out/org/thisisthepy/compose/ui/ui/$V/ui-$V.module"
+if [[ ! -e "$out/org/thisisthepy/compose/ui/ui-js" && -d "$out/org/thisisthepy/compose/ui/ui-wasm-js" ]] &&
+    grep -q "skip  org.thisisthepy.compose.ui:ui-js:$V" "$work/log" && ! grep -q '"jsApiElements-published"' "$root" &&
+    grep -q wasmJsApiElements-published "$root" && grep -q linuxX64ApiElements-published "$root" &&
+    python3 -I "$tool" validate "$out" --verify-signatures > "$work/vlog"; then
+    pass "a skipped target's components and root variant are left out, wasm-js and linuxX64 kept"
+else
+    fail "skip-target"; cat "$work/log" "$work/vlog" >&2
+fi
 
 # A dev build: every version, and every reference to one, gets the suffix.
 S=-dev.0123abc

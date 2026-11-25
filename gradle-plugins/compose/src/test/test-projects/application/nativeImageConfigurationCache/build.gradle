@@ -1,0 +1,29 @@
+import org.jetbrains.compose.desktop.application.dsl.ApplicationOutput
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
+plugins {
+    id "org.jetbrains.kotlin.jvm"
+    id "org.jetbrains.kotlin.plugin.compose"
+    id "org.thisisthepy.compose"
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib"
+}
+
+tasks.withType(KotlinCompile).configureEach {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
+    }
+}
+
+compose.desktop {
+    application {
+        mainClass = "MainKt"
+        output = ApplicationOutput.NativeImage
+        nativeImage {
+            graalvmHome = "/no/graalvm/here"
+        }
+    }
+}

@@ -1,0 +1,30 @@
+pluginManagement {
+    plugins {
+        id 'org.jetbrains.kotlin.jvm' version 'KOTLIN_VERSION_PLACEHOLDER'
+        id 'org.jetbrains.kotlin.plugin.compose' version 'KOTLIN_VERSION_PLACEHOLDER'
+        id 'org.thisisthepy.compose' version 'COMPOSE_GRADLE_PLUGIN_VERSION_PLACEHOLDER'
+    }
+    repositories {
+        mavenLocal()
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+        maven {
+            url 'https://packages.jetbrains.team/maven/p/cmp/dev'
+        }
+    }
+}
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        google()
+        maven {
+            url 'https://packages.jetbrains.team/maven/p/cmp/dev'
+        }
+        mavenLocal()
+    }
+}
+rootProject.name = "native-image-cc"

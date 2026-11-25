@@ -59,7 +59,12 @@ internal fun JvmApplicationContext.configureNativeImage() {
     // native-image itself.
     val checkNoAwt = tasks.register<CheckNativeImageNoAwtTask>(taskNameAction = "check", taskNameObject = "nativeImageNoAwt") {
         description = "Fails when the native image executable still refers to AWT."
-        onlyIf { app.windowing.get() == ApplicationWindowing.AwtFree }
+        // The spec reads the task's own input, not the application: whatever a lambda here
+        // holds is stored in the configuration cache, and the application holds its Kotlin
+        // target, which cannot be stored ("Cannot run Project.afterEvaluate(Action) when the
+        // project is already evaluated").
+        windowing.set(app.windowing)
+        onlyIf { task -> (task as CheckNativeImageNoAwtTask).windowing.get() == ApplicationWindowing.AwtFree }
         executable.set(
             packageTask.flatMap { image ->
                 image.imageName.zip(image.destinationDir) { name, dir ->
@@ -78,10 +83,14 @@ internal fun JvmApplicationContext.configureNativeImage() {
         description = "Runs the application with GraalVM's tracing agent to collect reachability metadata."
         val runtime = project.objects.fileCollection()
         useAppRuntimeFiles { (runtimeJars, _) -> runtime.from(runtimeJars) }
+        // Providers rather than the application, for the same reason as the check above: the
+        // action is stored in the configuration cache with everything it refers to.
+        val mainClass = project.provider { app.mainClass }
+        val appArgs = project.provider { app.args.toList() }
         doFirst {
             val home = graalvmHome.orNull
                 ?: throw GradleException("Set nativeImage.graalvmHome or GRAALVM_HOME to a GraalVM.")
-            val main = app.mainClass ?: throw GradleException("compose.desktop.application.mainClass is not set.")
+            val main = mainClass.orNull ?: throw GradleException("compose.desktop.application.mainClass is not set.")
             val output = metadataDirectory.get().asFile.apply { mkdirs() }
             commandLine(
                 listOf(
@@ -89,7 +98,7 @@ internal fun JvmApplicationContext.configureNativeImage() {
                     "-agentlib:native-image-agent=config-merge-dir=${output.absolutePath}",
                     "-cp", runtime.files.joinToString(File.pathSeparator),
                     main,
-                ) + app.args
+                ) + appArgs.get()
             )
         }
     }

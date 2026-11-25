@@ -8,6 +8,7 @@ import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.*
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.compose.ComposeBuildConfig
+import org.jetbrains.compose.desktop.preview.internal.skikoVersionOf
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.desktop.ui.tooling.preview.rpc.*
 import org.jetbrains.compose.internal.utils.*
@@ -102,9 +103,9 @@ abstract class AbstractConfigureDesktopPreviewTask : AbstractComposeDesktopTask(
                         continue
                     } else if (file.name.startsWith("skiko-awt-")) {
                         hasSkikoJvm = true
-                        skikoVersion = file.name
-                            .removePrefix("skiko-awt-")
-                            .removeSuffix(".jar")
+                        // From the jar's own Version class: this fork's skiko-awt is named with
+                        // the fork's version, not skiko's (skikoVersionOf).
+                        skikoVersion = skikoVersionOf(file)
                     }
                 }
             }

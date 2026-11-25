@@ -25,6 +25,7 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
 import org.jetbrains.compose.desktop.application.internal.NativeImageMainThread
+import org.jetbrains.compose.desktop.application.internal.NativeImageLeftovers
 import org.jetbrains.compose.desktop.application.internal.NativeImageNoAwt
 import org.jetbrains.compose.desktop.tasks.AbstractComposeDesktopTask
 import org.jetbrains.compose.internal.utils.OS
@@ -198,7 +199,9 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         argFile.writeText(args.drop(1).joinToString("\n") { quoteArgument(it) })
         logger.info("native-image arguments:\n" + args.drop(1).joinToString("\n"))
         run(listOf(args.first(), "@${argFile.absolutePath}"), workDir.resolve("native-image.log"))
-        if (platform == Platform.LinuxX64 || platform == Platform.LinuxArm64) removeUnneededLinuxLibraries(output)
+        for (file in NativeImageLeftovers.remove(currentOS, output)) {
+            logger.info("native-image: removed $file, which the executable does not load")
+        }
         logger.lifecycle("The executable is written to ${output.resolve(imageName.get())}")
     }
 
@@ -247,7 +250,7 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
      *
      * GraalVM still writes the shared libraries it would have used beside the executable
      * (the `java` and `jvm` shims, `awt_headless`, `freetype`); the executable needs none of
-     * them, and [removeUnneededLinuxLibraries] takes them away.
+     * them, and [NativeImageLeftovers] takes them away.
      */
     private fun linuxLink(graalvm: File, staticJdk: File, skikoArchive: File, skiaArchives: List<File>, awt: Boolean): Pair<List<String>, List<String>> {
         val onLoad = compileC(graalvm, resourceText("static_onload.c"), "static_onload")
@@ -288,13 +291,6 @@ abstract class AbstractNativeImageTask : AbstractComposeDesktopTask() {
         // there links it.
         if (currentArch == Arch.Arm64) linker("-lEGL")
         return linked to link
-    }
-
-    private fun removeUnneededLinuxLibraries(output: File) {
-        for (library in listOf("libjava.so", "libjvm.so", "libawt_headless.so", "libfreetype.so")) {
-            val file = output.resolve(library)
-            if (file.delete()) logger.info("native-image: removed $file, which the executable does not load")
-        }
     }
 
     /**

@@ -9,16 +9,22 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentSelector
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentSelector
-import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import org.gradle.api.artifacts.result.ResolvedComponentResult
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
+import org.jetbrains.compose.desktop.preview.internal.skikoVersionOf
 import org.jetbrains.compose.internal.KOTLIN_JVM_PLUGIN_ID
 import org.jetbrains.compose.internal.KOTLIN_MPP_PLUGIN_ID
+import org.jetbrains.compose.internal.forkSkikoAwtGroup
 import org.jetbrains.compose.internal.kotlinJvmExt
 import org.jetbrains.compose.internal.mppExt
 import org.jetbrains.compose.internal.utils.dependsOn
@@ -68,7 +74,14 @@ private fun KotlinTarget.configureRuntimeLibrariesCompatibilityCheck(extension: 
                     config.incoming.resolutionResult.allDependencies
                         .filterIsInstance<ResolvedDependencyResult>()
                 }
-            )
+            )            // Only on a JVM class path is there a skiko-awt jar; elsewhere this is empty.
+            if (target.platformType == KotlinPlatformType.jvm) {
+                forkSkikoAwtJars.from(
+                    config.incoming.artifactView { view ->
+                        view.componentFilter { id -> id is ModuleComponentIdentifier && id.group == forkSkikoAwtGroup }
+                    }.files
+                )
+            }
         }
         compilation.compileTaskProvider.dependsOn(task)
     }
@@ -91,6 +104,9 @@ internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
             "org.jetbrains.compose.ui:ui" to "${ComposeBuildConfig.composeLibrariesGroup}.ui:ui",
         )
         val skikoLibraryForCheck = "org.jetbrains.skiko:skiko"
+        const val skikoGroup = "org.jetbrains.skiko"
+        val skikoModulesForFork = setOf("skiko", "skiko-awt")
+
 
         private val majorMinorRegex = """^(\d+)\.(\d+)""".toRegex()
         fun majorMinorVersion(version: String): String {
@@ -115,6 +131,11 @@ internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
 
     @get:Input
     abstract val excludedModules: SetProperty<String>
+
+    /** This fork's skiko-awt jars on the class path, which say what skiko they are (skikoVersionOf). */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val forkSkikoAwtJars: ConfigurableFileCollection
 
     @get:Internal
     abstract val checkEnabled: Property<Boolean>
@@ -151,19 +172,33 @@ internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
             )
         }
 
+        val forkSkikoVersion = forkSkikoAwtJars.files.firstNotNullOfOrNull { skikoVersionOf(it) }
         val skikoIncompatibleDependencyUsages = dependencies.filter { dependency ->
             val requested = dependency.requested as? ModuleComponentSelector ?: return@filter false
             val selected = dependency.selected.moduleVersion ?: return@filter false
-            if ("${requested.group}:${requested.module}" != skikoLibraryForCheck) return@filter false
-            if ("${selected.group}:${selected.name}" != skikoLibraryForCheck) return@filter false
-            majorMinorVersion(requested.version) != majorMinorVersion(selected.version)
+            if (requested.version.isBlank()) return@filter false
+            when {
+                "${requested.group}:${requested.module}" == skikoLibraryForCheck &&
+                    "${selected.group}:${selected.name}" == skikoLibraryForCheck ->
+                    majorMinorVersion(requested.version) != majorMinorVersion(selected.version)
+                // A request for skiko that this fork's skiko-awt answered (keepOneSkikoAwt): what
+                // runs is skiko at the version the fork's skiko-awt was built from, whatever the
+                // request said, so that is the version to compare (#78).
+                requested.group == skikoGroup && requested.module in skikoModulesForFork &&
+                    selected.group == forkSkikoAwtGroup -> {
+                    val upstream = forkSkikoVersion ?: return@filter false
+                    majorMinorVersion(requested.version) != majorMinorVersion(upstream)
+                }
+                else -> false
+            }
         }
         if (skikoIncompatibleDependencyUsages.isNotEmpty()) {
             logger.warn(
                 getSkikoMessage(
                     projectPath.get(),
                     configurationName.get(),
-                    skikoIncompatibleDependencyUsages
+                    skikoIncompatibleDependencyUsages,
+                    forkSkikoVersion,
                 )
             )
         }
@@ -206,6 +241,7 @@ internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
         projectName: String,
         configurationName: String,
         dependencyUsages: List<ResolvedDependencyResult>,
+        forkSkikoVersion: String?,
     ): String = buildString {
         appendLine("w: Skiko dependencies' versions are incompatible.")
         dependencyUsages.forEach { usage ->
@@ -213,7 +249,12 @@ internal abstract class RuntimeLibrariesCompatibilityCheck : DefaultTask() {
             val requested = usage.requested
             val selected = usage.selected.moduleVersion
             appendLine("    ${from.toModuleString()}")
-            appendLine("    \\--- ${requested.toModuleString()} -> ${selected?.version}")
+            val answeredBy = if (selected?.group == forkSkikoAwtGroup) {
+                "${selected.group}:${selected.name}:${selected.version} (skiko ${forkSkikoVersion ?: "?"})"
+            } else {
+                selected?.version
+            }
+            appendLine("    \\--- ${requested.toModuleString()} -> $answeredBy")
             appendLine()
         }
         appendNoteAboutDependencyMismatch(projectName, configurationName)

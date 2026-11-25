@@ -150,6 +150,12 @@ class DesktopApplicationTest : GradlePluginTestBase() {
                 "Note: duplicate definition of resource file [META-INF/runtime-saveable.kotlin_module]",
                 "Note: duplicate definition of resource file [META-INF/runtime.kotlin_module]",
                 "Note: duplicate definition of resource file [META-INF/savedstate-compose.kotlin_module]",
+                // The fork's runtime-desktop and runtime-saveable-desktop keep their license where
+                // Google's jars of the same libraries keep theirs, and depend on those jars
+                // (thisisthepy/compose-multiplatform-core-extended#315, fixed for 1.11.1-ext.7).
+                // Remove these two when the default Compose version is ext.7.
+                "Note: duplicate definition of resource file [META-INF/androidx/compose/runtime/runtime/LICENSE.txt]",
+                "Note: duplicate definition of resource file [META-INF/androidx/compose/runtime/runtime-saveable/LICENSE.txt]",
             )
             val expectedNotePatterns = listOf(
                 Regex("""Note: there were \d+ duplicate class definitions\."""),

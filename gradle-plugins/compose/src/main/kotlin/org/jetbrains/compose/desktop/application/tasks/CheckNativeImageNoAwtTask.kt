@@ -8,11 +8,14 @@ package org.jetbrains.compose.desktop.application.tasks
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
+import org.jetbrains.compose.desktop.application.dsl.ApplicationWindowing
 import org.jetbrains.compose.desktop.application.internal.NativeImageNoAwt
 
 /**
@@ -27,6 +30,10 @@ abstract class CheckNativeImageNoAwtTask : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val executable: RegularFileProperty
+
+    /** The application's windowing; the check runs only for [ApplicationWindowing.AwtFree]. */
+    @get:Input
+    abstract val windowing: Property<ApplicationWindowing>
 
     @TaskAction
     fun check() {

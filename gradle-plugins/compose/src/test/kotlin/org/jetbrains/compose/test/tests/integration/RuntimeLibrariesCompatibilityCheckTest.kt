@@ -33,7 +33,8 @@ class RuntimeLibrariesCompatibilityCheckTest : GradlePluginTestBase() {
 
         // The fork has published no other version to mismatch with, so the mismatch here is
         // the one that matters in practice: JetBrains' build of the same library next to the
-        // plugin's, which is a second copy of the same classes whatever its version.
+        // plugin's, which is a second copy of the same classes whatever its version, when the
+        // plugin is told to keep JetBrains' modules as they are asked for.
         file("build.gradle.kts").modify {
             it.replace(
                 "api(\"org.thisisthepy.compose.ui:ui:${defaultTestEnvironment.composeVersion}\")",
@@ -51,6 +52,11 @@ class RuntimeLibrariesCompatibilityCheckTest : GradlePluginTestBase() {
             appendLine("    expected: 'org.thisisthepy.compose.foundation:foundation:${defaultTestEnvironment.composeVersion}'")
             appendLine("    actual:   'org.jetbrains.compose.foundation:foundation:1.9.3'")
         }
+        // The plugin resolves JetBrains' Compose as the fork's (useForkForJetBrainsCompose), so by
+        // default there is no second copy to warn about.
+        checkMainTargetsCompatibility(msg, warningExpected = false)
+        // Kept as asked for, JetBrains' build is the second copy again, and the check says so.
+        file("gradle.properties").appendText("\norg.thisisthepy.compose.substituteJetBrainsCompose=false\n")
         checkMainTargetsCompatibility(msg, warningExpected = true)
         checkMainTargetsCompatibility(msg, warningExpected = false, disabled = true)
     }

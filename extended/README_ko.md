@@ -41,7 +41,7 @@ extended/compose/publish-local.sh desktop      # 또는 macosArm64, linuxX64, li
 # 이 저장소에서
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.2
+    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.6
 ```
 
 `settings.gradle.kts` 와 `build.gradle.kts` 는 영어 README 의 Install 절과 같습니다. 플러그인 ID 는
@@ -257,15 +257,28 @@ compose.desktop.application {
   로컬 빌드는 `-ext.<N>-dev` 이고, probe 와 예제는 `1.11.1-ext.3-dev` 를 씁니다.
 - 별칭(`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` 등)은
   compose-multiplatform-core-extended 의 `org.thisisthepy.compose.*` 라이브러리를 `-Pcompose.version`
-  과 `-Pcompose.material3.version`(`1.11.1-ext.2`)으로 가리킵니다.
+  과 `-Pcompose.material3.version`(`1.11.1-ext.6`)으로 가리킵니다.
   `compose("org.jetbrains.compose.ui:ui")` 도 포크의 좌표로 바뀝니다.
+- JetBrains Compose 로 빌드된 라이브러리(JetBrains 의 lifecycle, navigation, 대부분의 서드파티
+  Compose 라이브러리)도 포크 위에서 돕니다. 그런 라이브러리가 가리키는 `org.jetbrains.compose.<x>:<y>`
+  중 포크가 배포하는 그룹(`runtime`, `ui`, `foundation`, `animation`, `material`, `material3`,
+  `desktop`, `annotation-internal`, `collection-internal`)은 위 버전의 `org.thisisthepy.compose.<x>:<y>`
+  로 해석됩니다. 그러지 않으면 Gradle 에게 둘은 다른 모듈이라 클래스패스에 Compose UI 가 두 벌 들어갑니다.
+  JetBrains 만 배포하는 Material 아이콘은 JetBrains 것을 그대로 씁니다. `gradle.properties` 에
+  `org.thisisthepy.compose.substituteJetBrainsCompose=false` 를 두면 모든 JetBrains 모듈을 요청한 그대로 둡니다.
 - components 와 Compose HTML 은 JetBrains 것을 업스트림 버전(`1.11.1`)으로 씁니다. core 포크가
   빌드하지 않기 때문입니다.
+- 데스크톱 클래스패스에는 skiko-awt 가 하나, 포크의 것(`org.thisisthepy.compose.skiko:skiko-awt`)만
+  들어갑니다. JetBrains 의 네이티브가 `org.jetbrains.skiko:skiko-awt` 에 다시 의존하는데, 플러그인이 둘을
+  포크의 것으로 정리합니다. 의존성 호환성 검사는 포크의 skiko-awt 가 대신 받은 `org.jetbrains.skiko`
+  요청을, 그 jar 가 빌드된 skiko 버전과 비교합니다.
+- hot reload 의 개발 도구는 따로 뜨는 창이라, hot reload 가 빌드된 버전의 JetBrains Compose 로 돕니다.
+  애플리케이션은 포크의 Compose 를 그대로 씁니다.
 
 ```sh
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.2
+    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.6
 ```
 
 ```kotlin

@@ -60,7 +60,7 @@ extended/compose/publish-local.sh desktop      # or macosArm64, linuxX64, linuxA
 # in this repository
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.2
+    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.6
 ```
 
 ```kotlin
@@ -343,16 +343,31 @@ The plugin is published under this fork's own name, so that it can sit beside Je
   `-ext.<N>-dev` for a local build. The probes and samples use `1.11.1-ext.3-dev`.
 - the aliases (`compose.desktop.currentOs`, `compose.foundation`, `compose.material3` and the rest)
   resolve to compose-multiplatform-core-extended's `org.thisisthepy.compose.*` libraries at
-  `-Pcompose.version` and `-Pcompose.material3.version` (`1.11.1-ext.2`).
+  `-Pcompose.version` and `-Pcompose.material3.version` (`1.11.1-ext.6`).
   `compose("org.jetbrains.compose.ui:ui")` is turned into the fork's
   coordinate too.
+- a library built against JetBrains' Compose (JetBrains' lifecycle and navigation, and most
+  third-party Compose libraries) runs on the fork's: every `org.jetbrains.compose.<x>:<y>` it
+  names, in the groups the fork publishes (`runtime`, `ui`, `foundation`, `animation`,
+  `material`, `material3`, `desktop`, `annotation-internal`, `collection-internal`), is resolved
+  as `org.thisisthepy.compose.<x>:<y>` at the version above. Otherwise the two are different
+  modules to Gradle, and the classpath carries two Compose UIs. The Material icons, which only
+  JetBrains publishes, stay JetBrains'. `org.thisisthepy.compose.substituteJetBrainsCompose=false`
+  in `gradle.properties` keeps every JetBrains module as it is asked for.
 - the components and Compose HTML stay JetBrains', at the upstream version (`1.11.1`), because
   the core fork does not build them.
+- a desktop classpath gets one skiko-awt, the fork's (`org.thisisthepy.compose.skiko:skiko-awt`):
+  JetBrains' natives depend on `org.jetbrains.skiko:skiko-awt` again, and the plugin resolves the
+  two to the fork's. The dependency compatibility check compares a request for
+  `org.jetbrains.skiko` that the fork's skiko-awt answers with the skiko version that jar was
+  built from.
+- the hot reload dev tools, a window of their own, run JetBrains' Compose at the version hot
+  reload was built with; the application keeps the fork's.
 
 ```sh
 cd gradle-plugins
 ./gradlew --no-daemon :compose:publishToMavenLocal \
-    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.2
+    -Pdeploy.version=1.11.1-ext.3-dev -Pcompose.version=1.11.1-ext.6
 ```
 
 ```kotlin

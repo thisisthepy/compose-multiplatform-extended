@@ -333,6 +333,8 @@ abstract class AbstractNativeLinuxPackageTask : AbstractNativeMacApplicationPack
     @get:PathSensitive(PathSensitivity.ABSOLUTE)
     val composeResourcesDirs: ConfigurableFileCollection = objects.fileCollection()
 
+    // packageName, which is an input, under the name the files are given.
+    @get:Internal
     protected val appName: String get() = packageName.get()
 
     protected fun desktopEntry(exec: String, icon: String): String = LinuxDesktopEntry.render(

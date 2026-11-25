@@ -5,6 +5,8 @@
 
 package org.thisisthepy.kotlin.gradle.nativedesktop
 
+import java.io.File
+import javax.inject.Inject
 import org.gradle.api.Action
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
@@ -19,6 +21,7 @@ import org.gradle.api.model.ObjectFactory
 import org.gradle.api.plugins.ExtensionAware
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
@@ -28,6 +31,7 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
@@ -46,8 +50,6 @@ import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcRequirements
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.MsvcToolchain
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.RealMsvcHost
 import org.thisisthepy.kotlin.gradle.nativedesktop.msvc.WindowsSubsystem
-import java.io.File
-import javax.inject.Inject
 
 /**
  * Kotlin/Native desktop programs, with or without Compose.
@@ -136,6 +138,7 @@ open class MsvcSettings @Inject constructor(objects: ObjectFactory) {
     fun subsystem(value: WindowsSubsystem) = subsystem.set(value)
 }
 
+@DisableCachingByDefault(because = "It checks this machine's MSVC toolchain and writes nothing")
 abstract class CheckMsvcToolchain : DefaultTask() {
     @get:Input @get:Optional abstract val minimumToolset: Property<String>
     @get:Input abstract val requireClangCl: Property<Boolean>
@@ -168,6 +171,7 @@ internal fun locateOrExplain(minimum: String?, requireClangCl: Boolean): MsvcToo
     }
 }
 
+@CacheableTask
 abstract class GenerateMsvcEntry : DefaultTask() {
     @get:Input abstract val entryPoint: Property<String>
     @get:Input abstract val symbol: Property<String>
